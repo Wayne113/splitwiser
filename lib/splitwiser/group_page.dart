@@ -3,6 +3,8 @@ import 'transaction_page.dart';
 import 'scan_page.dart';
 import 'group_detail_page.dart';
 import 'create_expense_form.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GroupPage extends StatefulWidget {
   const GroupPage({super.key});
@@ -12,125 +14,56 @@ class GroupPage extends StatefulWidget {
 }
 
 class GroupPageState extends State<GroupPage> {
-  // Details of the group page
-  final List<Map<String, dynamic>> groups = [
-    {
-      'name': 'Birthday House',
-      'date': 'Mar 24, 2023',
-      'total': 4508.32,
-      'details': [
-        {
-          'avatar': Icons.person,
-          'name': 'John',
-          'text': 'owes you',
-          'amount': 1502.75,
-        },
-        {
-          'avatar': Icons.person,
-          'name': 'Wade',
-          'text': 'owes you',
-          'amount': 1502.75,
-        },
-      ],
-      'status': {
-        'text': 'You are owed',
-        'amount': 3005.54,
-        'color': Color(0xFFCBF7D3),
-      },
-      'items': [
-        {
-          'name': 'Dinner',
-          'date': 'Mar 22, 2023',
-          'amount': 120.0,
-          'paidBy': 'John',
-          'split': [
-            {'name': 'John', 'amount': 40.0},
-            {'name': 'Wade', 'amount': 40.0},
-            {'name': 'You', 'amount': 40.0},
-          ]
-        },
-        {
-          'name': 'Cake',
-          'date': 'Mar 23, 2023',
-          'amount': 80.0,
-          'paidBy': 'Wade',
-          'split': [
-            {'name': 'John', 'amount': 26.67},
-            {'name': 'Wade', 'amount': 26.67},
-            {'name': 'You', 'amount': 26.66},
-          ]
-        },
-      ],
-    },
-    {
-      'name': 'Party Time',
-      'date': 'Mar 24, 2023',
-      'total': 2501.32,
-      'details': [],
-      'status': {'text': 'Settled up', 'color': Color(0xFFF3F3F3)},
-      'items': [
-        {
-          'name': 'Drinks',
-          'date': 'Mar 24, 2023',
-          'amount': 50.0,
-          'paidBy': 'You',
-          'split': [
-            {'name': 'You', 'amount': 25.0},
-            {'name': 'Jack', 'amount': 25.0},
-          ]
-        },
-      ],
-    },
-    {
-      'name': 'Shopping',
-      'date': 'Mar 24, 2023',
-      'total': 505.00,
-      'details': [
-        {
-          'avatar': Icons.person,
-          'name': 'Jack',
-          'text': 'owes you',
-          'amount': 952.66,
-        },
-        {
-          'avatar': Icons.person,
-          'name': 'Kim',
-          'text': 'owes you',
-          'amount': 556.66,
-        },
-      ],
-      'status': {
-        'text': 'You owe',
-        'amount': 625.25,
-        'color': Color(0xFFFFE0E0),
-      },
-      'items': [
-        {
-          'name': 'Groceries',
-          'date': 'Mar 24, 2023',
-          'amount': 200.0,
-          'paidBy': 'Kim',
-          'split': [
-            {'name': 'Jack', 'amount': 100.0},
-            {'name': 'Kim', 'amount': 100.0},
-          ]
-        },
-      ],
-    },
-  ];
+  List<Map<String, dynamic>> groups = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGroups();
+  }
+
+  Future<void> _loadGroups() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    try {
+      final savedGroups = prefs.getStringList('groups') ?? [];
+      setState(() {
+        groups = savedGroups
+            .map((groupStr) => json.decode(groupStr) as Map<String, dynamic>)
+            .toList();
+      });
+    } catch (e) {
+      final groupsData = prefs.get('groups');
+      if (groupsData is String) {
+        await prefs.remove('groups');
+        setState(() {
+          groups = [];
+        });
+      } else {
+        setState(() {
+          groups = [];
+        });
+      }
+    }
+  }
+
+  Future<void> _saveGroups() async {
+    final prefs = await SharedPreferences.getInstance();
+    final groupsJson = groups.map((group) => json.encode(group)).toList();
+    await prefs.setStringList('groups', groupsJson);
+  }
 
   int selectedIndex = 0;
   double scanScale = 1.0;
 
-  // Method to delete a group
   void _deleteGroup(String groupName) {
     setState(() {
       groups.removeWhere((group) => group['name'] == groupName);
+      _saveGroups();
     });
   }
 
   @override
-  //Background color + how many groups
   Widget build(BuildContext context) {
     Widget bodyContent;
     if (selectedIndex == 0) {
@@ -174,7 +107,12 @@ class GroupPageState extends State<GroupPage> {
                             context,
                             MaterialPageRoute(
                               builder: (context) => CreateExpenseForm(
-                                groups: groups.map((g) => g['name'] as String).toList(),
+                                groups: groups
+                                    .map((g) => g['name'] as String)
+                                    .toList(),
+                                onExpenseCreated: () {
+                                  _loadGroups(); 
+                                },
                               ),
                             ),
                           );
@@ -295,7 +233,7 @@ class GroupPageState extends State<GroupPage> {
             borderRadius: BorderRadius.circular(30.0),
             boxShadow: [
               BoxShadow(
-                color:  Color.fromARGB(93, 0, 0, 0),
+                color: Color.fromARGB(93, 0, 0, 0),
                 blurRadius: 1,
                 offset: Offset(0, 3),
               ),
@@ -395,21 +333,23 @@ class GroupPageState extends State<GroupPage> {
       onTap: () {
         Navigator.of(context).push(
           PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) => GroupDetailPage(
-              group: group,
-              onDeleteGroup: () => _deleteGroup(group['name']),
-            ),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return ScaleTransition(
-                scale: Tween<double>(begin: 0.98, end: 1.0).animate(
-                  CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                GroupDetailPage(
+                  group: group,
+                  onDeleteGroup: () => _deleteGroup(group['name']),
                 ),
-                child: FadeTransition(
-                  opacity: animation,
-                  child: child,
-                ),
-              );
-            },
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+                  return ScaleTransition(
+                    scale: Tween<double>(begin: 0.98, end: 1.0).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeInOut,
+                      ),
+                    ),
+                    child: FadeTransition(opacity: animation, child: child),
+                  );
+                },
             transitionDuration: Duration(milliseconds: 200),
           ),
         );
@@ -418,7 +358,7 @@ class GroupPageState extends State<GroupPage> {
         margin: const EdgeInsets.only(bottom: 20),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color.fromARGB(104, 255, 255, 255),
+          color: const Color.fromARGB(121, 255, 255, 255),
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
@@ -460,7 +400,7 @@ class GroupPageState extends State<GroupPage> {
                   ),
                 ),
                 Text(
-                  'RM ${group['total'].toStringAsFixed(2)}',
+                  'RM ${(group['total'] ?? 0.0).toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
@@ -469,8 +409,9 @@ class GroupPageState extends State<GroupPage> {
               ],
             ),
             const SizedBox(height: 12),
-            if (group['details'].isNotEmpty)
-              ...group['details'].map<Widget>(
+            if (group['details'] != null &&
+                (group['details'] as List).isNotEmpty)
+              ...(group['details'] as List).map<Widget>(
                 (detail) => Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Row(
@@ -479,19 +420,24 @@ class GroupPageState extends State<GroupPage> {
                         radius: 12,
                         backgroundColor: Colors.grey[200],
                         child: Icon(
-                          detail['avatar'],
+                          detail['avatar'] != null
+                              ? IconData(
+                                  detail['avatar'] as int,
+                                  fontFamily: 'MaterialIcons',
+                                )
+                              : Icons.person,
                           size: 16,
                           color: Colors.blueGrey,
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${detail['name']} ${detail['text']}',
+                        '${detail['name'] ?? ''} ${detail['text'] ?? ''}',
                         style: const TextStyle(fontSize: 14),
                       ),
                       const Spacer(),
                       Text(
-                        'RM ${detail['amount'].toStringAsFixed(2)}',
+                        'RM ${(detail['amount'] ?? 0.0).toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontWeight: FontWeight.w500,
                           fontSize: 14,
@@ -501,50 +447,60 @@ class GroupPageState extends State<GroupPage> {
                   ),
                 ),
               ),
-            if (group['details'].isEmpty)
+            if (group['details'] == null || (group['details'] as List).isEmpty)
               Container(
                 margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
-                  color: group['status']['color'],
+                  color: group['status']?['color'] != null
+                      ? Color(group['status']['color'] as int)
+                      : Colors.grey[300],
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  group['status']['text'],
+                  group['status']?['text'] ?? 'No expenses yet',
                   style: const TextStyle(
                     fontWeight: FontWeight.w500,
                     fontSize: 14,
                   ),
                 ),
               ),
-            if (group['status']['amount'] != null)
+            if (group['status'] != null && group['status']['amount'] != null)
               Container(
                 margin: const EdgeInsets.only(top: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
-                  color: group['status']['color'],
+                  color: group['status']['color'] != null
+                      ? Color(group['status']['color'] as int)
+                      : Colors.grey[300],
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   children: [
                     Text(
-                      group['status']['text'],
+                      group['status']['text'] ?? '',
                       style: TextStyle(
                         fontWeight: FontWeight.w500,
                         fontSize: 14,
-                        color: group['status']['color'] == const Color(0xFFFFE0E0)
+                        color: group['status']['color'] == 0xFFFFE0E0
                             ? Colors.red
                             : Colors.green,
                       ),
                     ),
                     const Spacer(),
                     Text(
-                      'RM ${group['status']['amount']?.toStringAsFixed(2) ?? ''}',
+                      'RM ${group['status']['amount']?.toStringAsFixed(2) ?? '0.00'}',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
-                        color: group['status']['color'] == const Color(0xFFFFE0E0)
+                        color: group['status']['color'] == 0xFFFFE0E0
                             ? Colors.red
                             : Colors.green,
                       ),

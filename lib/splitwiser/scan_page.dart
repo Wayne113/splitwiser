@@ -29,7 +29,7 @@ class _ScanPageState extends State<ScanPage> {
       }
 
       _controller = CameraController(
-        cameras[0], // Use the first camera (usually the back camera)
+        cameras[0],
         ResolutionPreset.high,
         enableAudio: false,
       );
@@ -56,7 +56,6 @@ class _ScanPageState extends State<ScanPage> {
 
     try {
       final XFile photo = await _controller!.takePicture();
-      // TODO: Process the photo (e.g., send to OCR service)
       print('Picture taken: ${photo.path}');
     } catch (e) {
       print('Error taking picture: $e');
@@ -84,7 +83,6 @@ class _ScanPageState extends State<ScanPage> {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
       if (image != null) {
-        // TODO: Process the selected image (e.g., send to OCR service)
         print('Image selected from gallery: ${image.path}');
       }
     } catch (e) {
@@ -111,7 +109,6 @@ class _ScanPageState extends State<ScanPage> {
                     ),
                   ),
           ),
-          // 顶部灰色半透明bar
           Positioned(
             top: 0,
             left: 0,
@@ -123,7 +120,7 @@ class _ScanPageState extends State<ScanPage> {
                 right: 8,
                 bottom: 8,
               ),
-              color: const Color.fromARGB(233, 43, 42, 42).withOpacity(0.45), // 灰色半透明
+              color: const Color.fromARGB(233, 43, 42, 42).withOpacity(0.45),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -139,12 +136,11 @@ class _ScanPageState extends State<ScanPage> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  SizedBox(width: 40), // 占位，保持居中
+                  SizedBox(width: 40), 
                 ],
               ),
             ),
           ),
-          // Top hint
           Positioned(
             top: 150,
             left: 0,
@@ -227,7 +223,7 @@ class ScanFramePainter extends CustomPainter {
     double cornerLength = 40;
     double radius = 18;
 
-    // 左上
+    // top left
     final path1 = Path();
     path1.moveTo(0, radius);
     path1.arcToPoint(Offset(radius, 0), radius: Radius.circular(radius), clockwise: true);
@@ -239,7 +235,7 @@ class ScanFramePainter extends CustomPainter {
     path2.lineTo(0, cornerLength);
     canvas.drawPath(path2, paint);
 
-    // 右上
+    // top right
     final path3 = Path();
     path3.moveTo(size.width - radius, 0);
     path3.arcToPoint(Offset(size.width, radius), radius: Radius.circular(radius), clockwise: true);
@@ -251,7 +247,7 @@ class ScanFramePainter extends CustomPainter {
     path4.lineTo(size.width - radius, 0);
     canvas.drawPath(path4, paint);
 
-    // 左下
+    // bottom left
     final path5 = Path();
     path5.moveTo(0, size.height - radius);
     path5.arcToPoint(Offset(radius, size.height), radius: Radius.circular(radius), clockwise: false);
@@ -263,7 +259,7 @@ class ScanFramePainter extends CustomPainter {
     path6.lineTo(0, size.height - cornerLength);
     canvas.drawPath(path6, paint);
 
-    // 右下
+    // bottom right
     final path7 = Path();
     path7.moveTo(size.width - radius, size.height);
     path7.arcToPoint(Offset(size.width, size.height - radius), radius: Radius.circular(radius), clockwise: false);

@@ -15,7 +15,6 @@ class GroupDetailPage extends StatelessWidget {
     final userName = _getUserName();
     final screenWidth = MediaQuery.of(context).size.width;
 
-    // Helper for item status
     Map<String, dynamic> _findUserInSplit(
       List<dynamic> split,
       String userName,
@@ -33,9 +32,9 @@ class GroupDetailPage extends StatelessWidget {
     Color _getItemBg(Map<String, dynamic> item, String userName) {
       final split = item['split'] as List<dynamic>? ?? [];
       final user = _findUserInSplit(split, userName);
-      if (user.isEmpty) return Color(0xFFF3F3F3); // Not Involved
-      if (item['paidBy'] == userName) return Color(0xFFE0F2E9); // Owes you
-      return Color(0xFFFFF0F0); // You owe
+      if (user.isEmpty) return Color(0xFFF3F3F3); 
+      if (item['paidBy'] == userName) return Color(0xFFE0F2E9); 
+      return Color(0xFFFFF0F0); 
     }
 
     Map<String, dynamic> _getItemStatus(
@@ -68,8 +67,8 @@ class GroupDetailPage extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color.fromARGB(232, 176, 150, 255),
-            Color.fromARGB(209, 99, 90, 221),
+            Color.fromARGB(232, 154, 134, 213),
+            Color.fromARGB(209, 77, 66, 221),
           ],
         ),
       ),
@@ -125,11 +124,9 @@ class GroupDetailPage extends StatelessWidget {
         ),
         body: Stack(
           children: [
-            // 下方两个卡片
             ListView(
               padding: EdgeInsets.only(top: 70),
               children: [
-                // Who owes whom 卡片（全屏宽，顶部圆角）
                 Container(
                   width: screenWidth,
                   margin: EdgeInsets.only(top: 0),
@@ -205,7 +202,6 @@ class GroupDetailPage extends StatelessWidget {
                     ],
                   ),
                 ),
-                // 日期/账单明细卡片（全屏宽，无圆角）
                 Transform.translate(
                   offset: Offset(0, -20),
                   child: Container(
@@ -297,7 +293,6 @@ class GroupDetailPage extends StatelessWidget {
                 ),
               ],
             ),
-            // 顶部 you are owed 卡片（悬浮，有阴影和圆角）
             Positioned(
               top: 20,
               left: 20,

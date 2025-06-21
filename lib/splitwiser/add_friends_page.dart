@@ -5,6 +5,21 @@ class Friend {
   final String email;
 
   Friend({required this.name, required this.email});
+
+  Map<String, dynamic> toJson() => {'name': name, 'email': email};
+
+  factory Friend.fromJson(Map<String, dynamic> json) {
+    return Friend(name: json['name'], email: json['email']);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Friend && other.email == email;
+  }
+
+  @override
+  int get hashCode => email.hashCode;
 }
 
 class AddFriendsPage extends StatefulWidget {
@@ -20,9 +35,9 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
 
   bool _isFormValid() {
     final emailRegex = RegExp(r'^[^@]+@[^@]+\.[^@]+$');
-    return _nameController.text.isNotEmpty && 
-           _emailController.text.isNotEmpty && 
-           emailRegex.hasMatch(_emailController.text);
+    return _nameController.text.isNotEmpty &&
+        _emailController.text.isNotEmpty &&
+        emailRegex.hasMatch(_emailController.text);
   }
 
   @override
@@ -36,7 +51,10 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add Friends', style: TextStyle(color: Colors.white70)),
+        title: const Text(
+          'Add Friends',
+          style: TextStyle(color: Colors.white70),
+        ),
         backgroundColor: const Color.fromARGB(255, 39, 39, 40),
         iconTheme: const IconThemeData(color: Colors.white70),
         leading: IconButton(
@@ -80,10 +98,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(
-                    color: Colors.deepPurple,
-                    width: 2,
-                  ),
+                  borderSide: BorderSide(color: Colors.deepPurple, width: 2),
                 ),
                 floatingLabelBehavior: FloatingLabelBehavior.always,
                 contentPadding: EdgeInsets.symmetric(
@@ -124,32 +139,37 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(
-                    color: Colors.deepPurple,
-                    width: 2,
-                  ),
+                  borderSide: BorderSide(color: Colors.deepPurple, width: 2),
                 ),
                 floatingLabelBehavior: FloatingLabelBehavior.always,
                 contentPadding: EdgeInsets.symmetric(
                   vertical: 20,
                   horizontal: 20,
                 ),
-                errorText: _emailController.text.isNotEmpty && !RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(_emailController.text) ? 'Please enter a valid email address' : null,
+                errorText:
+                    _emailController.text.isNotEmpty &&
+                        !RegExp(
+                          r'^[^@]+@[^@]+\.[^@]+$',
+                        ).hasMatch(_emailController.text)
+                    ? 'Please enter a valid email address'
+                    : null,
               ),
               style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-            // You can add more input fields here later if needed
+            ),            
             Spacer(),
+
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _isFormValid() ? () {
-                  final newFriend = Friend(
-                    name: _nameController.text,
-                    email: _emailController.text,
-                  );
-                  Navigator.pop(context, newFriend);
-                } : null,
+                onPressed: _isFormValid()
+                    ? () {
+                        final newFriend = Friend(
+                          name: _nameController.text,
+                          email: _emailController.text,
+                        );
+                        Navigator.pop(context, newFriend);
+                      }
+                    : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Color.fromARGB(164, 92, 56, 200),
                   disabledBackgroundColor: Color.fromARGB(36, 92, 56, 200),
@@ -170,9 +190,8 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
               ),
             ),
           ],
-          
         ),
       ),
     );
   }
-} 
+}
