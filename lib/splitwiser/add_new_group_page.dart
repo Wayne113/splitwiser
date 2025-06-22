@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:splitwiser/splitwiser/add_friends_page.dart';
-import 'package:splitwiser/splitwiser/select_friends_page.dart';
+import 'package:splitwiser/splitwiser/friends_page.dart';
+import 'package:splitwiser/splitwiser/profile_page.dart';
 
 class Group {
   final String name;
@@ -8,20 +9,44 @@ class Group {
 
   Group({required this.name, required this.members});
 
-  Map<String, dynamic> toJson() => {
-    'name': name,
-    'members': members.map((m) => m.toJson()).toList(),
-    'date': DateTime.now().toString().split(
-      ' ',
-    )[0],
-    'total': 0.0,
-    'details': <Map<String, dynamic>>[], 
-    'status': {
-      'text': 'No expenses yet',
-      'color': 0xFFE8F5E8, 
-      'amount': null,
-    },
-  };
+  Future<Map<String, dynamic>> toJson() async {
+    // Get current user profile
+    final userProfile = await ProfileManager.loadProfile();
+
+    // Create a list that includes the current user plus selected friends
+    final allMembers = <Map<String, dynamic>>[];
+
+    // Add current user first
+    if (userProfile != null) {
+      allMembers.add({
+        'name': userProfile.name,
+        'email': userProfile.email,
+        'isCurrentUser': true,
+      });
+    } else {
+      // Fallback if no profile is set
+      allMembers.add({
+        'name': 'You',
+        'email': 'you@example.com',
+        'isCurrentUser': true,
+      });
+    }
+
+    // Add selected friends
+    allMembers.addAll(members.map((m) => {
+      ...m.toJson(),
+      'isCurrentUser': false,
+    }));
+
+    return {
+      'name': name,
+      'members': allMembers,
+      'date': DateTime.now().toString().split(' ')[0],
+      'total': 0.0,
+      'details': <Map<String, dynamic>>[],
+      'status': {'text': 'No expenses yet', 'color': 0xFFE8F5E8, 'amount': null},
+    };
+  }
 
   factory Group.fromJson(Map<String, dynamic> json) {
     return Group(
@@ -42,7 +67,7 @@ class AddNewGroupPage extends StatefulWidget {
 
 class _AddNewGroupPageState extends State<AddNewGroupPage> {
   final TextEditingController _groupNameController = TextEditingController();
-  List<Friend> _addedFriends = []; 
+  List<Friend> _addedFriends = [];
 
   bool _isFormValid() {
     return _groupNameController.text.isNotEmpty;
@@ -121,9 +146,8 @@ class _AddNewGroupPageState extends State<AddNewGroupPage> {
                 final selectedFriends = await Navigator.push<List<Friend>>(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => SelectFriendsPage(
-                      selectedFriends: _addedFriends,
-                    ),
+                    builder: (context) =>
+                        FriendsPage(selectedFriends: _addedFriends),
                   ),
                 );
                 if (selectedFriends != null) {
@@ -133,10 +157,7 @@ class _AddNewGroupPageState extends State<AddNewGroupPage> {
                 }
               },
               child: Container(
-                padding: EdgeInsets.symmetric(
-                  vertical: 0,
-                  horizontal: 5,
-                ),
+                padding: EdgeInsets.symmetric(vertical: 0, horizontal: 5),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -149,82 +170,77 @@ class _AddNewGroupPageState extends State<AddNewGroupPage> {
                 ),
               ),
             ),
-            SizedBox(height: 24),  
-            if (_addedFriends.isNotEmpty) 
-              Expanded(
-                child: ListView(
-                  children: _addedFriends.map((friend) {
-                    return Container(
-                      margin: const EdgeInsets.symmetric(vertical: 8.0),
-                      padding: EdgeInsets.symmetric(
-                        vertical: 20,
-                        horizontal: 20,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Color.fromARGB(255, 37, 37, 39),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.grey,
-                          width: 1.0,
+            SizedBox(height: 24),
+            Expanded(
+              child: ListView(
+                children: _addedFriends.map((friend) {
+                  return Container(
+                    margin: const EdgeInsets.symmetric(vertical: 8.0),
+                    padding: EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: Color.fromARGB(255, 37, 37, 39),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.grey, width: 1.0),
+                    ),
+                    child: Stack(
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              friend.name,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              friend.email,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      child: Stack(
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                friend.name,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                friend.email,
-                                style: TextStyle(fontSize: 14, color: Colors.white70),
-                              ),
-                            ],
-                          ),
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: Container(
-                              width: 18,
-                              height: 18,
-                              decoration: BoxDecoration(
-                                color: Colors.red[300],
-                                shape: BoxShape.circle,
-                              ),
-                              child: InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _addedFriends.remove(friend);
-                                  });
-                                },
-                                borderRadius: BorderRadius.circular(9),
-                                child: Icon(
-                                  Icons.close,
-                                  color: Colors.white,
-                                  size: 12,
-                                ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: Colors.red[300],
+                              shape: BoxShape.circle,
+                            ),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _addedFriends.remove(friend);
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(9),
+                              child: Icon(
+                                Icons.close,
+                                color: Colors.white,
+                                size: 12,
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
               ),
-            Spacer(), 
+            ),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isFormValid()
-                    ? () {
+                    ? () async {
                         final newGroup = Group(
                           name: _groupNameController.text,
                           members: _addedFriends,
@@ -236,9 +252,7 @@ class _AddNewGroupPageState extends State<AddNewGroupPage> {
                   backgroundColor: Color.fromARGB(164, 92, 56, 200),
                   disabledBackgroundColor: Color.fromARGB(36, 92, 56, 200),
                   foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(
-                    vertical: 16,
-                  ),
+                  padding: EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),

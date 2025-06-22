@@ -8,11 +8,15 @@ import 'dart:convert';
 class CreateExpenseForm extends StatefulWidget {
   final List<String> groups;
   final VoidCallback? onExpenseCreated;
+  final String? preSelectedGroup;
+  final Map<String, dynamic>? editingExpense;
 
   const CreateExpenseForm({
     Key? key,
     required this.groups,
     this.onExpenseCreated,
+    this.preSelectedGroup,
+    this.editingExpense,
   }) : super(key: key);
 
   @override
@@ -84,11 +88,21 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
   late TextEditingController _dateController;
   late TextEditingController _currencyController;
   late TextEditingController _splitMethodController;
+  late TextEditingController _groupController;
   String? selectedSplitMethod;
 
   List<Map<String, dynamic>> groupMembers = [];
   String? selectedSinglePayer;
   Map<String, double> multiplePayers = {};
+
+  // Store split data for editing
+  Map<String, double> editingSplitAmounts = {};
+  Set<String> editingSelectedMembers = {};
+  Map<String, double> editingPercentages = {};
+  Map<String, int> editingShares = {};
+
+  // Store actual split data from split method selector
+  List<Map<String, dynamic>>? actualSplitData;
 
   void _showAlertDialog(String title, String message) {
     showDialog(
@@ -128,6 +142,11 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
               .map((m) => m as Map<String, dynamic>)
               .toList();
         });
+
+        // Update paid by controller after loading members (especially important for editing mode)
+        if (widget.editingExpense != null && paidByType != null) {
+          _updatePaidByController();
+        }
         break;
       }
     }
@@ -154,9 +173,22 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
     }
   }
 
+  bool _isValidAmount(String text) {
+    if (text.isEmpty) return false;
+
+    // Check for leading zeros (except for "0" itself and "0.xx" format)
+    if (text.length > 1 && text.startsWith('0') && !text.startsWith('0.')) {
+      return false;
+    }
+
+    double? amount = double.tryParse(text);
+    return amount != null && amount > 0;
+  }
+
   bool _isFormValid() {
     return descController.text.isNotEmpty &&
         totalController.text.isNotEmpty &&
+        _isValidAmount(totalController.text) &&
         selectedGroup != null &&
         paidByType != null &&
         selectedSplitMethod != null &&
@@ -172,6 +204,112 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
     _splitMethodController = TextEditingController(
       text: selectedSplitMethod ?? '',
     );
+    _groupController = TextEditingController(text: selectedGroup ?? '');
+
+    // Check if we're editing an existing expense
+    if (widget.editingExpense != null) {
+      _populateFieldsForEditing();
+      // Load group members for editing mode
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadGroupMembers();
+      });
+    } else {
+      // Set default date to today for new expenses
+      final now = DateTime.now();
+      final formattedDate = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      _dateController.text = formattedDate;
+
+      // Set pre-selected group if provided
+      if (widget.preSelectedGroup != null) {
+        selectedGroup = widget.preSelectedGroup;
+        // Load group members for the pre-selected group
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _loadGroupMembers();
+        });
+      }
+    }
+  }
+
+  void _populateFieldsForEditing() {
+    final expense = widget.editingExpense!;
+
+    // Populate basic fields
+    descController.text = expense['name'] ?? '';
+    totalController.text = expense['amount']?.toString() ?? '';
+    _dateController.text = expense['date'] ?? '';
+
+    // Set group (should be non-editable)
+    selectedGroup = widget.preSelectedGroup;
+
+    // Set currency if available
+    if (expense['currency'] != null) {
+      selectedCurrency = expense['currency'];
+      _currencyController.text = selectedCurrency;
+    }
+
+    // Set icon if available
+    if (expense['avatar'] != null) {
+      final avatarCodePoint = expense['avatar'] as int;
+      // Find the matching icon index
+      for (int i = 0; i < icons.length; i++) {
+        if (icons[i]['icon'].codePoint == avatarCodePoint) {
+          selectedIconIndex = i;
+          break;
+        }
+      }
+    }
+
+    // Handle paid by information
+    if (expense.containsKey('paidBy')) {
+      final paidBy = expense['paidBy'] as Map<String, dynamic>;
+      if (paidBy['type'] == 'single') {
+        paidByType = 'Single';
+        selectedSinglePayer = paidBy['payer'];
+      } else if (paidBy['type'] == 'multiple') {
+        paidByType = 'Multiple';
+        final payers = paidBy['payers'] as Map<String, dynamic>;
+        multiplePayers = Map<String, double>.from(payers);
+      }
+      // Don't call _updatePaidByController() here - will be called after group members are loaded
+    }
+
+    // Handle split information
+    if (expense.containsKey('split')) {
+      final split = expense['split'] as List<dynamic>;
+      if (split.isNotEmpty) {
+        final firstSplit = split.first;
+        final method = firstSplit['method'] as String? ?? 'custom';
+
+        // Store split data for editing
+        editingSplitAmounts.clear();
+        editingSelectedMembers.clear();
+        editingPercentages.clear();
+        editingShares.clear();
+
+        for (var splitItem in split) {
+          final email = splitItem['email'] as String;
+          editingSelectedMembers.add(email);
+
+          if (method == 'equally') {
+            selectedSplitMethod = 'Evenly';
+          } else if (method == 'custom') {
+            selectedSplitMethod = 'Custom Amount';
+            editingSplitAmounts[email] = (splitItem['amount'] as double? ?? 0.0);
+          } else if (method == 'percentage') {
+            selectedSplitMethod = 'Percentage';
+            editingPercentages[email] = (splitItem['percentage'] as double? ?? 0.0);
+          } else if (method == 'shares') {
+            selectedSplitMethod = 'Shares';
+            editingShares[email] = (splitItem['shares'] as int? ?? 1);
+          }
+        }
+
+        // Also store the actual split data for immediate use
+        actualSplitData = List<Map<String, dynamic>>.from(split);
+
+        _splitMethodController.text = selectedSplitMethod ?? '';
+      }
+    }
   }
 
   @override
@@ -201,601 +339,705 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Create Expense', style: TextStyle(color: Colors.white70)),
+        title: Text(
+          widget.editingExpense != null ? 'Edit Expense' : 'Create Expense',
+          style: TextStyle(color: Colors.white70)
+        ),
         backgroundColor: Color.fromARGB(255, 39, 39, 40),
         iconTheme: IconThemeData(color: Colors.white70),
       ),
       backgroundColor: Color.fromARGB(255, 39, 39, 40),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: GestureDetector(
+        onTap: () {
+          // Dismiss keyboard when tapping outside
+          FocusScope.of(context).unfocus();
+        },
+        child: Stack(
           children: [
-            // Description + Icon
-            SizedBox(height: 15),
-            Row(
-              children: [
-                // Description input
-                Expanded(
-                  child: TextField(
-                    controller: descController,
-                    onChanged: (value) => setState(() {}),
-                    decoration: InputDecoration(
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Description',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            ' *',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      hintText: 'Enter description',
-                      hintStyle: TextStyle(color: Colors.white70),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: Colors.grey),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: Colors.grey),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(
-                          color: Colors.deepPurple,
-                          width: 2,
-                        ),
-                      ),
-                      floatingLabelBehavior: FloatingLabelBehavior.always,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 20,
-                        horizontal: 20,
-                      ),
-                    ),
-                    style: TextStyle(fontSize: 16, color: Colors.white),
-                  ),
-                ),
-                SizedBox(width: 12),
-                // Icon picker
-                Container(
-                  height: 52,
-                  width: 52,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      icons[selectedIconIndex]['icon'],
-                      color: Color(0xFF7F55FF),
-                    ),
-                    onPressed: () async {
-                      int? picked = await showModalBottomSheet<int>(
-                        context: context,
-                        builder: (_) => _buildIconPicker(context),
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          selectedIconIndex = picked;
-                        });
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 24),
-
-            // Total + Currency
-            Row(
-              children: [
-                // Total input
-                Expanded(
-                  child: TextField(
-                    controller: totalController,
-                    onChanged: (value) => setState(() {}),
-                    keyboardType: TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-                    ],
-                    decoration: InputDecoration(
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('Total', style: TextStyle(color: Colors.white)),
-                          Text(
-                            ' *',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      hintText: 'Enter total amount',
-                      hintStyle: TextStyle(color: Colors.white70),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: Colors.grey),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: Colors.grey),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(
-                          color: Colors.deepPurple,
-                          width: 2,
-                        ),
-                      ),
-                      floatingLabelBehavior: FloatingLabelBehavior.always,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 20,
-                        horizontal: 20,
-                      ),
-                    ),
-                    style: TextStyle(fontSize: 16, color: Colors.white),
-                  ),
-                ),
-                SizedBox(width: 10),
-                // Currency picker
-                SizedBox(
-                  width: 100,
-                  child: TextField(
-                    readOnly: true,
-                    controller: _currencyController,
-                    decoration: InputDecoration(
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Currency',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ],
-                      ),
-                      hintText: 'Select currency',
-                      hintStyle: TextStyle(color: Colors.white70),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: Colors.grey),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: Colors.grey),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(
-                          color: Colors.deepPurple,
-                          width: 2,
-                        ),
-                      ),
-                      floatingLabelBehavior: FloatingLabelBehavior.always,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 20,
-                        horizontal: 20,
-                      ),
-                    ),
-                    onTap: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        builder: (context) => DraggableScrollableSheet(
-                          initialChildSize: 0.9,
-                          minChildSize: 0.4,
-                          maxChildSize: 0.9,
-                          expand: false,
-                          builder: (context, scrollController) =>
-                              CurrencySelector(
-                                currencies: currencies,
-                                scrollController: scrollController,
-                                onSelect: (code) {
-                                  setState(() {
-                                    selectedCurrency = code;
-                                    _currencyController.text = selectedCurrency;
-                                  });
-                                  Navigator.pop(context);
-                                },
+            Padding(
+              padding: EdgeInsets.only(
+                left: 24.0,
+                right: 24.0,
+                top: 24.0,
+                bottom: 24.0,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Description + Icon
+                    SizedBox(height: 15),
+                    Row(
+                      children: [
+                        // Description input
+                        Expanded(
+                          child: TextField(
+                            controller: descController,
+                            onChanged: (value) => setState(() {}),
+                            decoration: InputDecoration(
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Description',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                  Text(
+                                    ' *',
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
+                              hintText: 'Enter description',
+                              hintStyle: TextStyle(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(color: Colors.grey),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(color: Colors.grey),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(
+                                  color: Colors.deepPurple,
+                                  width: 2,
+                                ),
+                              ),
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                vertical: 20,
+                                horizontal: 20,
+                              ),
+                            ),
+                            style: TextStyle(fontSize: 16, color: Colors.white),
+                          ),
                         ),
-                      );
-                    },
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+                        SizedBox(width: 12),
+                        // Icon picker
+                        Container(
+                          height: 52,
+                          width: 52,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: IconButton(
+                            icon: Icon(
+                              icons[selectedIconIndex]['icon'],
+                              color: Color(0xFF7F55FF),
+                            ),
+                            onPressed: () async {
+                              int? picked = await showModalBottomSheet<int>(
+                                context: context,
+                                builder: (_) => _buildIconPicker(context),
+                              );
+                              if (picked != null) {
+                                setState(() {
+                                  selectedIconIndex = picked;
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 24),
+                    SizedBox(height: 24),
 
-            // Group
-            TextField(
-              readOnly: true,
-              controller: TextEditingController(text: selectedGroup ?? ''),
-              decoration: InputDecoration(
-                label: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Group', style: TextStyle(color: Colors.white)),
-                    Text(
-                      ' *',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    // Total + Currency
+                    Row(
+                      children: [
+                        // Total input
+                        Expanded(
+                          child: TextField(
+                            controller: totalController,
+                            onChanged: (value) => setState(() {}),
+                            keyboardType: TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}'),
+                              ),
+                            ],
+                            decoration: InputDecoration(
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Total',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                  Text(
+                                    ' *',
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              hintText: 'Enter total amount',
+                              hintStyle: TextStyle(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(color: Colors.grey),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(
+                                  color: (totalController.text.isNotEmpty && !_isValidAmount(totalController.text))
+                                    ? Colors.red
+                                    : Colors.grey,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(
+                                  color: (totalController.text.isNotEmpty && !_isValidAmount(totalController.text))
+                                    ? Colors.red
+                                    : Colors.deepPurple,
+                                  width: 2,
+                                ),
+                              ),
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                vertical: 20,
+                                horizontal: 20,
+                              ),
+                            ),
+                            style: TextStyle(fontSize: 16, color: Colors.white),
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        // Currency picker
+                        SizedBox(
+                          width: 100,
+                          child: TextField(
+                            readOnly: true,
+                            controller: _currencyController,
+                            decoration: InputDecoration(
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Currency',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                              hintText: 'Select currency',
+                              hintStyle: TextStyle(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(color: Colors.grey),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(color: Colors.grey),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(
+                                  color: Colors.deepPurple,
+                                  width: 2,
+                                ),
+                              ),
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                vertical: 20,
+                                horizontal: 20,
+                              ),
+                            ),
+                            onTap: () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                builder: (context) => DraggableScrollableSheet(
+                                  initialChildSize: 0.9,
+                                  minChildSize: 0.4,
+                                  maxChildSize: 0.9,
+                                  expand: false,
+                                  builder: (context, scrollController) =>
+                                      CurrencySelector(
+                                        currencies: currencies,
+                                        scrollController: scrollController,
+                                        onSelect: (code) {
+                                          setState(() {
+                                            selectedCurrency = code;
+                                            _currencyController.text =
+                                                selectedCurrency;
+                                          });
+                                          Navigator.pop(context);
+                                        },
+                                      ),
+                                ),
+                              );
+                            },
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                hintText: 'Select group',
-                hintStyle: TextStyle(color: Colors.white70),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.deepPurple, width: 2),
-                ),
-                floatingLabelBehavior: FloatingLabelBehavior.always,
-                contentPadding: EdgeInsets.symmetric(
-                  vertical: 20,
-                  horizontal: 20,
-                ),
-              ),
-              onTap: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  builder: (context) => DraggableScrollableSheet(
-                    initialChildSize: 0.9,
-                    minChildSize: 0.4,
-                    maxChildSize: 0.9,
-                    expand: false,
-                    builder: (context, scrollController) => GroupSelector(
-                      groups: widget.groups,
-                      scrollController: scrollController,
-                      initialSelectedGroup: selectedGroup,
-                      onSelect: (g) async {
-                        setState(() {
-                          selectedGroup = g;
-                        });
-                        await _loadGroupMembers();
+                    // Error message for invalid total amount
+                    if (totalController.text.isNotEmpty && !_isValidAmount(totalController.text))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+                        child: Text(
+                          totalController.text.length > 1 &&
+                          totalController.text.startsWith('0') &&
+                          !totalController.text.startsWith('0.')
+                            ? 'Leading zeros are not allowed'
+                            : 'Amount must be greater than 0',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    SizedBox(height: 24),
+
+                    // Group
+                    TextField(
+                      readOnly: true,
+                      enabled: widget.editingExpense == null && widget.preSelectedGroup == null, // Disable when editing OR when group is pre-selected
+                      controller: TextEditingController(
+                        text: selectedGroup ?? '',
+                      ),
+                      decoration: InputDecoration(
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Group',
+                              style: TextStyle(
+                                color: (widget.editingExpense != null || widget.preSelectedGroup != null)
+                                  ? Colors.grey
+                                  : Colors.white
+                              ),
+                            ),
+                            Text(
+                              ' *',
+                              style: TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        hintText: 'Select group',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(
+                            color: (widget.editingExpense != null || widget.preSelectedGroup != null)
+                              ? Colors.grey.shade600
+                              : Colors.grey
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        disabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey.shade600),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(
+                            color: Color(0xFF7F55FF),
+                            width: 2,
+                          ),
+                        ),
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        contentPadding: EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 20,
+                        ),
+                      ),
+                      onTap: widget.editingExpense != null ? null : () {
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          builder: (context) => DraggableScrollableSheet(
+                            initialChildSize: 0.9,
+                            minChildSize: 0.4,
+                            maxChildSize: 0.9,
+                            expand: false,
+                            builder: (context, scrollController) =>
+                                GroupSelector(
+                                  groups: widget.groups,
+                                  scrollController: scrollController,
+                                  initialSelectedGroup: selectedGroup,
+                                  onSelect: (g) async {
+                                    setState(() {
+                                      selectedGroup = g;
+                                    });
+                                    await _loadGroupMembers();
+                                  },
+                                ),
+                          ),
+                        );
                       },
-                    ),
-                  ),
-                );
-              },
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-
-            SizedBox(height: 24),
-
-            // Paid by
-            TextField(
-              readOnly: true,
-              controller: _paidByController,
-              decoration: InputDecoration(
-                label: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Paid by', style: TextStyle(color: Colors.white)),
-                    Text(
-                      ' *',
                       style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: (widget.editingExpense != null || widget.preSelectedGroup != null)
+                          ? Colors.grey
+                          : Colors.white
                       ),
                     ),
-                  ],
-                ),
-                hintText: 'Select payer',
-                hintStyle: TextStyle(color: Colors.white70),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.deepPurple, width: 2),
-                ),
-                floatingLabelBehavior: FloatingLabelBehavior.always,
-                contentPadding: EdgeInsets.symmetric(
-                  vertical: 20,
-                  horizontal: 20,
-                ),
-              ),
-              onTap: () {
-                if (totalController.text.isEmpty) {
-                  _showAlertDialog(
-                    'Missing Information',
-                    'Please fill in the Total amount first.',
-                  );
-                  return;
-                } else if (selectedGroup == null) {
-                  _showAlertDialog(
-                    'Missing Information',
-                    'Please select a Group first.',
-                  );
-                  return;
-                }
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  builder: (context) => DraggableScrollableSheet(
-                    initialChildSize: 0.9,
-                    minChildSize: 0.4,
-                    maxChildSize: 0.9,
-                    expand: false,
-                    builder: (context, scrollController) => PaidBySelector(
-                      groupMembers: groupMembers,
-                      scrollController: scrollController,
-                      totalAmount: double.tryParse(totalController.text) ?? 0.0,
-                      currency: selectedCurrency,
-                      onConfirm: (type, singlePayer, multiplePayers) {
-                        setState(() {
-                          paidByType = type;
-                          selectedSinglePayer = singlePayer;
-                          this.multiplePayers = Map.from(multiplePayers);
-                          _updatePaidByController();
-                        });
-                        Navigator.pop(context);
-                      },
-                    ),
-                  ),
-                );
-              },
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-            SizedBox(height: 24),
 
-            // Split Method
-            TextField(
-              readOnly: true,
-              controller: _splitMethodController,
-              decoration: InputDecoration(
-                label: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Split', style: TextStyle(color: Colors.white)),
-                    Text(
-                      ' *',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
+                    SizedBox(height: 24),
+
+                    // Paid by
+                    TextField(
+                      readOnly: true,
+                      controller: _paidByController,
+                      decoration: InputDecoration(
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Paid by',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            Text(
+                              ' *',
+                              style: TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        hintText: 'Select payer',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(
+                            color: Colors.deepPurple,
+                            width: 2,
+                          ),
+                        ),
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        contentPadding: EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 20,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                hintText: 'Select split method',
-                hintStyle: TextStyle(color: Colors.white70),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.deepPurple, width: 2),
-                ),
-                floatingLabelBehavior: FloatingLabelBehavior.always,
-                contentPadding: EdgeInsets.symmetric(
-                  vertical: 20,
-                  horizontal: 20,
-                ),
-              ),
-              onTap: () {
-                if (totalController.text.isEmpty) {
-                  _showAlertDialog(
-                    'Missing Information',
-                    'Please fill in the Total amount first.',
-                  );
-                  return;
-                } else if (selectedGroup == null) {
-                  _showAlertDialog(
-                    'Missing Information',
-                    'Please select a Group first.',
-                  );
-                  return;
-                }
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  builder: (modalContext) => DraggableScrollableSheet(
-                    initialChildSize: 0.9,
-                    minChildSize: 0.4,
-                    maxChildSize: 0.9,
-                    expand: false,
-                    builder: (context, scrollController) => SplitMethodSelector(
-                      onSelect: (method, selectedContext) {
-                        setState(() {
-                          selectedSplitMethod = method;
-                          _splitMethodController.text = method;
-                        });
-                        Navigator.pop(selectedContext);
-                      },
-                      scrollController: scrollController,
-                      initialSelectedMethod: selectedSplitMethod,
-                      groupMembers: groupMembers,
-                      totalAmount: double.tryParse(totalController.text) ?? 0.0,
-                      currency: selectedCurrency,
-                    ),
-                  ),
-                );
-              },
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-            SizedBox(height: 24),
+                      onTap: () {
+                        if (totalController.text.isEmpty) {
+                          _showAlertDialog(
+                            'Missing Information',
+                            'Please fill in the Total amount first.',
+                          );
+                          return;
+                        }
 
-            // Date
-            TextField(
-              readOnly: true,
-              controller: _dateController,
-              decoration: InputDecoration(
-                label: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Date', style: TextStyle(color: Colors.white)),
-                    Text(
-                      ' *',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                hintText: 'Select date',
-                hintStyle: TextStyle(color: Colors.white70),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.grey),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide(color: Colors.deepPurple, width: 2),
-                ),
-                floatingLabelBehavior: FloatingLabelBehavior.always,
-                contentPadding: EdgeInsets.symmetric(
-                  vertical: 20,
-                  horizontal: 20,
-                ),
-              ),
-              onTap: () async {
-                DateTime? picked = await showDatePicker(
-                  context: context,
-                  initialDate: selectedDate,
-                  firstDate: DateTime(2000),
-                  lastDate: DateTime(2100),
-                );
-                if (picked != null) {
-                  setState(() {
-                    selectedDate = picked;
-                    _dateController.text = DateFormat(
-                      'MMMM d, yyyy',
-                    ).format(selectedDate);
-                  });
-                }
-              },
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-
-            Spacer(),
-
-            // Create button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isFormValid()
-                    ? () async {
-                        // Create expense and add to selected group
-                        final prefs = await SharedPreferences.getInstance();
-                        final savedGroups = prefs.getStringList('groups') ?? [];
-
-                        // Find and update the selected group
-                        for (int i = 0; i < savedGroups.length; i++) {
-                          final groupData =
-                              json.decode(savedGroups[i])
-                                  as Map<String, dynamic>;
-                          if (groupData['name'] == selectedGroup) {
-                            // Add expense to group details
-                            final details = groupData['details'] as List;
-                            details.add({
-                              'name': 'You',
-                              'text': 'paid for ${descController.text}',
-                              'amount': double.parse(totalController.text),
-                              'avatar':
-                                  icons[selectedIconIndex]['icon'].codePoint,
-                            });
-
-                            // Update group total
-                            groupData['total'] =
-                                (groupData['total'] ?? 0.0) +
-                                double.parse(totalController.text);
-
-                            // Update group status
-                            groupData['status'] = {
-                              'text': 'You are owed',
-                              'color': 0xFFE8F5E8,
-                              'amount': double.parse(totalController.text),
-                            };
-
-                            // Save updated group
-                            savedGroups[i] = json.encode(groupData);
-                            break;
+                        if (!_isValidAmount(totalController.text)) {
+                          String errorMessage = 'Please enter a valid amount greater than 0.';
+                          if (totalController.text.length > 1 &&
+                              totalController.text.startsWith('0') &&
+                              !totalController.text.startsWith('0.')) {
+                            errorMessage = 'Leading zeros are not allowed. Please enter a valid amount.';
                           }
+                          _showAlertDialog(
+                            'Invalid Amount',
+                            errorMessage,
+                          );
+                          return;
                         }
 
-                        await prefs.setStringList('groups', savedGroups);
-
-                        // Call the callback if provided
-                        widget.onExpenseCreated?.call();
-
-                        // Navigate back to group page
-                        if (mounted) {
-                          Navigator.of(
-                            context,
-                          ).popUntil((route) => route.isFirst);
+                        if (selectedGroup == null) {
+                          _showAlertDialog(
+                            'Missing Information',
+                            'Please select a Group first.',
+                          );
+                          return;
                         }
-                      }
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Color.fromARGB(164, 92, 56, 200),
-                  disabledBackgroundColor: Color.fromARGB(36, 92, 56, 200),
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  'Create',
-                  style: TextStyle(
-                    color: const Color.fromARGB(255, 255, 255, 255),
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          builder: (context) => DraggableScrollableSheet(
+                            initialChildSize: 0.9,
+                            minChildSize: 0.4,
+                            maxChildSize: 0.9,
+                            expand: false,
+                            builder: (context, scrollController) =>
+                                PaidBySelector(
+                                  groupMembers: groupMembers,
+                                  scrollController: scrollController,
+                                  totalAmount:
+                                      double.tryParse(totalController.text) ??
+                                      0.0,
+                                  currency: selectedCurrency,
+                                  onConfirm:
+                                      (type, singlePayer, multiplePayers) {
+                                        setState(() {
+                                          paidByType = type;
+                                          selectedSinglePayer = singlePayer;
+                                          this.multiplePayers = Map.from(
+                                            multiplePayers,
+                                          );
+                                          _updatePaidByController();
+                                        });
+                                        Navigator.pop(context);
+                                      },
+                                ),
+                          ),
+                        );
+                      },
+                      style: TextStyle(fontSize: 16, color: Colors.white),
+                    ),
+                    SizedBox(height: 24),
+
+                    // Split Method
+                    TextField(
+                      readOnly: true,
+                      controller: _splitMethodController,
+                      decoration: InputDecoration(
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Split',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            Text(
+                              ' *',
+                              style: TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        hintText: 'Select split method',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(
+                            color: Colors.deepPurple,
+                            width: 2,
+                          ),
+                        ),
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        contentPadding: EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 20,
+                        ),
+                      ),
+                      onTap: () {
+                        if (totalController.text.isEmpty) {
+                          _showAlertDialog(
+                            'Missing Information',
+                            'Please fill in the Total amount first.',
+                          );
+                          return;
+                        }
+
+                        if (!_isValidAmount(totalController.text)) {
+                          String errorMessage = 'Please enter a valid amount greater than 0.';
+                          if (totalController.text.length > 1 &&
+                              totalController.text.startsWith('0') &&
+                              !totalController.text.startsWith('0.')) {
+                            errorMessage = 'Leading zeros are not allowed. Please enter a valid amount.';
+                          }
+                          _showAlertDialog(
+                            'Invalid Amount',
+                            errorMessage,
+                          );
+                          return;
+                        }
+
+                        if (selectedGroup == null) {
+                          _showAlertDialog(
+                            'Missing Information',
+                            'Please select a Group first.',
+                          );
+                          return;
+                        }
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          builder: (modalContext) => DraggableScrollableSheet(
+                            initialChildSize: 0.9,
+                            minChildSize: 0.4,
+                            maxChildSize: 0.9,
+                            expand: false,
+                            builder: (context, scrollController) =>
+                                SplitMethodSelector(
+                                  onSelect: (method, selectedContext, splitData) {
+                                    setState(() {
+                                      selectedSplitMethod = method;
+                                      _splitMethodController.text = method;
+                                      actualSplitData = splitData; // Store the actual split data
+                                    });
+                                    Navigator.pop(selectedContext);
+                                  },
+                                  scrollController: scrollController,
+                                  initialSelectedMethod: selectedSplitMethod,
+                                  groupMembers: groupMembers,
+                                  totalAmount:
+                                      double.tryParse(totalController.text) ??
+                                      0.0,
+                                  currency: selectedCurrency,
+                                  // Pass editing data
+                                  editingSplitAmounts: widget.editingExpense != null ? editingSplitAmounts : null,
+                                  editingSelectedMembers: widget.editingExpense != null ? editingSelectedMembers : null,
+                                  editingPercentages: widget.editingExpense != null ? editingPercentages : null,
+                                  editingShares: widget.editingExpense != null ? editingShares : null,
+                                ),
+                          ),
+                        );
+                      },
+                      style: TextStyle(fontSize: 16, color: Colors.white),
+                    ),
+                    SizedBox(height: 24),
+
+                    // Date
+                    TextField(
+                      readOnly: true,
+                      controller: _dateController,
+                      decoration: InputDecoration(
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Date', style: TextStyle(color: Colors.white)),
+                            Text(
+                              ' *',
+                              style: TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        hintText: 'Select date',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(color: Colors.grey),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide(
+                            color: Colors.deepPurple,
+                            width: 2,
+                          ),
+                        ),
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        contentPadding: EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 20,
+                        ),
+                      ),
+                      onTap: () async {
+                        DateTime? picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            selectedDate = picked;
+                            _dateController.text = DateFormat(
+                              'MMMM d, yyyy',
+                            ).format(selectedDate);
+                          });
+                        }
+                      },
+                      style: TextStyle(fontSize: 16, color: Colors.white),
+                    ),
+
+                    SizedBox(height: 40),
+
+                    // Create button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isFormValid()
+                            ? () async {
+                                if (widget.editingExpense != null) {
+                                  // Update existing expense
+                                  await _updateExpense();
+                                } else {
+                                  // Create new expense
+                                  await _createExpense();
+                                }
+                              }
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Color.fromARGB(164, 92, 56, 200),
+                          disabledBackgroundColor: Color.fromARGB(
+                            36,
+                            92,
+                            56,
+                            200,
+                          ),
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          widget.editingExpense != null ? 'Done' : 'Create',
+                          style: TextStyle(
+                            color: const Color.fromARGB(255, 255, 255, 255),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -803,6 +1045,381 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         ),
       ),
     );
+  }
+
+  Future<void> _createExpense() async {
+    // Create expense and add to selected group
+    final prefs = await SharedPreferences.getInstance();
+    final savedGroups = prefs.getStringList('groups') ?? [];
+
+    // Find and update the selected group
+    for (int i = 0; i < savedGroups.length; i++) {
+      final groupData = json.decode(savedGroups[i]) as Map<String, dynamic>;
+      if (groupData['name'] == selectedGroup) {
+        // Create expense data with detailed payment and split info
+        final expenseData = {
+          'name': descController.text,
+          'amount': double.parse(totalController.text),
+          'currency': selectedCurrency,
+          'date': selectedDate.toString().split(' ')[0],
+          'avatar': icons[selectedIconIndex]['icon'].codePoint,
+          'paidBy': _getPaidByData(),
+          'split': _getSplitData(),
+        };
+
+        // Add expense to group expenses list
+        if (groupData['expenses'] == null) {
+          groupData['expenses'] = [];
+        }
+        (groupData['expenses'] as List).add(expenseData);
+
+        // Update group total
+        groupData['total'] = (groupData['total'] ?? 0.0) + double.parse(totalController.text);
+
+        // Calculate and update settlement details
+        _updateGroupSettlement(groupData);
+
+        // Save updated group
+        savedGroups[i] = json.encode(groupData);
+        break;
+      }
+    }
+
+    await prefs.setStringList('groups', savedGroups);
+
+    // Call the callback if provided
+    widget.onExpenseCreated?.call();
+
+    // Navigate back appropriately
+    if (mounted) {
+      if (widget.preSelectedGroup != null) {
+        // If we came from group detail page, just go back to it
+        Navigator.of(context).pop();
+      } else {
+        // If we came from main group page, go back to main page
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
+  Future<void> _updateExpense() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedGroups = prefs.getStringList('groups') ?? [];
+    final originalExpense = widget.editingExpense!;
+
+    // Find and update the selected group
+    for (int i = 0; i < savedGroups.length; i++) {
+      final groupData = json.decode(savedGroups[i]) as Map<String, dynamic>;
+      if (groupData['name'] == selectedGroup) {
+        final expenses = groupData['expenses'] as List<dynamic>? ?? [];
+
+        // Find the expense to update by matching original data more precisely
+        final expenseIndex = expenses.indexWhere((expense) {
+          // Match by multiple fields to ensure we get the exact expense
+          bool nameMatch = expense['name'] == originalExpense['name'];
+          bool dateMatch = expense['date'] == originalExpense['date'];
+          bool amountMatch = (expense['amount'] as double).toStringAsFixed(2) ==
+                           (originalExpense['amount'] as double).toStringAsFixed(2);
+
+          // Also check avatar if available
+          bool avatarMatch = true;
+          if (expense.containsKey('avatar') && originalExpense.containsKey('avatar')) {
+            avatarMatch = expense['avatar'] == originalExpense['avatar'];
+          }
+
+          return nameMatch && dateMatch && amountMatch && avatarMatch;
+        });
+
+        if (expenseIndex != -1) {
+          // Update the expense data
+          final updatedExpenseData = {
+            'name': descController.text,
+            'amount': double.parse(totalController.text),
+            'currency': selectedCurrency,
+            'date': selectedDate.toString().split(' ')[0], // Use consistent date format
+            'avatar': icons[selectedIconIndex]['icon'].codePoint,
+            'paidBy': _getPaidByData(),
+            'split': _getSplitData(),
+          };
+
+          // Replace the old expense with updated data
+          expenses[expenseIndex] = updatedExpenseData;
+
+          // Recalculate group total and settlement details
+          _recalculateGroupData(groupData);
+
+          // Save updated group
+          savedGroups[i] = json.encode(groupData);
+
+          await prefs.setStringList('groups', savedGroups);
+
+          // Call the callback if provided
+          widget.onExpenseCreated?.call();
+
+          // Navigate back to group detail page
+          if (mounted) {
+            Navigator.of(context).pop(updatedExpenseData);
+          }
+          return;
+        }
+        break;
+      }
+    }
+  }
+
+  void _recalculateGroupData(Map<String, dynamic> groupData) {
+    // Recalculate total from all expenses
+    final expenses = groupData['expenses'] as List<dynamic>? ?? [];
+    double total = 0.0;
+    for (var expense in expenses) {
+      total += (expense['amount'] as double? ?? 0.0);
+    }
+    groupData['total'] = total;
+
+    // Recalculate settlement details
+    _updateGroupSettlement(groupData);
+  }
+
+  Map<String, dynamic> _getPaidByData() {
+    if (selectedSinglePayer != null) {
+      // Find the payer's email from group members
+      String payerEmail = selectedSinglePayer!;
+      for (var member in groupMembers) {
+        if (member['name'] == selectedSinglePayer ||
+            member['email'] == selectedSinglePayer) {
+          payerEmail = member['email'];
+          break;
+        }
+      }
+
+      return {
+        'type': 'single',
+        'payer': payerEmail,
+        'amount': double.parse(totalController.text),
+      };
+    } else if (multiplePayers.isNotEmpty) {
+      return {'type': 'multiple', 'payers': multiplePayers};
+    }
+
+    // Default to current user
+    String currentUserEmail = 'You';
+    for (var member in groupMembers) {
+      if (member['isCurrentUser'] == true) {
+        currentUserEmail = member['email'];
+        break;
+      }
+    }
+
+    return {
+      'type': 'single',
+      'payer': currentUserEmail,
+      'amount': double.parse(totalController.text),
+    };
+  }
+
+  List<Map<String, dynamic>> _getSplitData() {
+    // If we have actual split data from the split method selector, use it
+    if (actualSplitData != null && actualSplitData!.isNotEmpty) {
+      return actualSplitData!;
+    }
+
+    // Fallback to generating split data (for editing or when no split data is available)
+    final splitData = <Map<String, dynamic>>[];
+    final totalAmount = double.parse(totalController.text);
+
+    if (selectedSplitMethod == 'Evenly') {
+      final amountPerPerson = totalAmount / groupMembers.length;
+      for (var member in groupMembers) {
+        splitData.add({
+          'email': member['email'],
+          'name': member['name'],
+          'amount': amountPerPerson,
+          'method': 'evenly',
+        });
+      }
+    } else if (selectedSplitMethod == 'Custom Amount') {
+      // Use stored custom amounts if editing, otherwise default to equal split
+      if (widget.editingExpense != null && editingSplitAmounts.isNotEmpty) {
+        // Use the stored custom amounts from editing
+        for (var member in groupMembers) {
+          final memberEmail = member['email'];
+          if (editingSelectedMembers.contains(memberEmail)) {
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'amount': editingSplitAmounts[memberEmail] ?? 0.0,
+              'method': 'custom',
+            });
+          }
+        }
+      } else {
+        // Default behavior for new expenses
+        for (var member in groupMembers) {
+          splitData.add({
+            'email': member['email'],
+            'name': member['name'],
+            'amount': totalAmount / groupMembers.length,
+            'method': 'custom',
+          });
+        }
+      }
+    } else if (selectedSplitMethod == 'Percentage') {
+      // Use stored percentages if editing, otherwise default to equal percentage
+      if (widget.editingExpense != null && editingPercentages.isNotEmpty) {
+        for (var member in groupMembers) {
+          final memberEmail = member['email'];
+          if (editingSelectedMembers.contains(memberEmail)) {
+            final percentage = editingPercentages[memberEmail] ?? 0.0;
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'percentage': percentage,
+              'amount': totalAmount * percentage / 100,
+              'method': 'percentage',
+            });
+          }
+        }
+      } else {
+        for (var member in groupMembers) {
+          splitData.add({
+            'email': member['email'],
+            'name': member['name'],
+            'percentage': 100.0 / groupMembers.length,
+            'amount': totalAmount * (100.0 / groupMembers.length) / 100,
+            'method': 'percentage',
+          });
+        }
+      }
+    } else if (selectedSplitMethod == 'Shares') {
+      // Use stored shares if editing, otherwise default to equal shares
+      if (widget.editingExpense != null && editingShares.isNotEmpty) {
+        final totalShares = editingShares.values.fold(0, (sum, shares) => sum + shares);
+        for (var member in groupMembers) {
+          final memberEmail = member['email'];
+          if (editingSelectedMembers.contains(memberEmail)) {
+            final shares = editingShares[memberEmail] ?? 1;
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'shares': shares,
+              'amount': totalAmount * shares / totalShares,
+              'method': 'shares',
+            });
+          }
+        }
+      } else {
+        for (var member in groupMembers) {
+          splitData.add({
+            'email': member['email'],
+            'name': member['name'],
+            'shares': 1,
+            'amount': totalAmount / groupMembers.length,
+            'method': 'shares',
+          });
+        }
+      }
+    } else {
+      // Default to evenly split
+      final amountPerPerson = totalAmount / groupMembers.length;
+      for (var member in groupMembers) {
+        splitData.add({
+          'email': member['email'],
+          'name': member['name'],
+          'amount': amountPerPerson,
+          'method': 'evenly',
+        });
+      }
+    }
+
+    return splitData;
+  }
+
+  void _updateGroupSettlement(Map<String, dynamic> groupData) {
+    // Calculate who owes whom based on all expenses
+    final expenses = groupData['expenses'] as List? ?? [];
+    final memberBalances = <String, double>{};
+
+    // Find current user's email
+    String currentUserEmail = 'You';
+    for (var member in groupMembers) {
+      if (member['isCurrentUser'] == true) {
+        currentUserEmail = member['email'];
+        break;
+      }
+    }
+
+    // Initialize balances for all members
+    for (var member in groupMembers) {
+      memberBalances[member['email']] = 0.0;
+    }
+
+    // Calculate balances from all expenses
+    for (var expense in expenses) {
+      final paidBy = expense['paidBy'] as Map<String, dynamic>;
+      final split = expense['split'] as List<dynamic>;
+
+      // Add amounts paid
+      if (paidBy['type'] == 'single') {
+        final payer = paidBy['payer'] as String;
+        final amount = paidBy['amount'] as double;
+        memberBalances[payer] = (memberBalances[payer] ?? 0.0) + amount;
+      } else if (paidBy['type'] == 'multiple') {
+        final payers = paidBy['payers'] as Map<String, dynamic>;
+        payers.forEach((email, amount) {
+          memberBalances[email] =
+              (memberBalances[email] ?? 0.0) + (amount as double);
+        });
+      }
+
+      // Subtract amounts owed
+      for (var splitItem in split) {
+        final email = splitItem['email'] as String;
+        final amount = splitItem['amount'] as double;
+        memberBalances[email] = (memberBalances[email] ?? 0.0) - amount;
+      }
+    }
+
+    // Update group details and status
+    final details = <Map<String, dynamic>>[];
+    double userBalance = memberBalances[currentUserEmail] ?? 0.0;
+
+    memberBalances.forEach((email, balance) {
+      if (balance != 0 && email != currentUserEmail) {
+        // Find member name by email
+        String memberName = email;
+        for (var member in groupMembers) {
+          if (member['email'] == email) {
+            memberName = member['name'];
+            break;
+          }
+        }
+
+        if (balance > 0) {
+          // This member has positive balance (they paid more than their share)
+          // So you owe them
+          details.add({
+            'name': 'You owe $memberName',
+            'text': '',
+            'amount': balance.abs(),
+          });
+        } else {
+          // This member has negative balance (they paid less than their share)
+          // So they owe you
+          details.add({
+            'name': '$memberName owes you',
+            'text': '',
+            'amount': balance.abs(),
+          });
+        }
+      }
+    });
+
+    groupData['details'] = details;
+    groupData['status'] = {
+      'text': userBalance >= 0 ? 'You are owed' : 'You owe',
+      'color': userBalance >= 0 ? 0xFFE8F5E8 : 0xFFFFE0E0,
+      'amount': userBalance.abs(),
+    };
   }
 
   Widget _buildIconPicker(BuildContext context) {
@@ -961,7 +1578,7 @@ class _GroupSelectorState extends State<GroupSelector> {
 
                 if (newGroup != null) {
                   // Convert to Map and add to groups
-                  final groupMap = newGroup.toJson();
+                  final groupMap = await newGroup.toJson();
                   // Get shared preferences
                   final prefs = await SharedPreferences.getInstance();
                   final savedGroups = prefs.getStringList('groups') ?? [];
@@ -1125,12 +1742,16 @@ class _CurrencySelectorState extends State<CurrencySelector> {
 }
 
 class SplitMethodSelector extends StatefulWidget {
-  final Function(String method, BuildContext modalContext) onSelect;
+  final Function(String method, BuildContext modalContext, List<Map<String, dynamic>> splitData) onSelect;
   final ScrollController scrollController;
   final String? initialSelectedMethod;
   final List<Map<String, dynamic>> groupMembers;
   final double totalAmount;
   final String currency;
+  final Map<String, double>? editingSplitAmounts;
+  final Set<String>? editingSelectedMembers;
+  final Map<String, double>? editingPercentages;
+  final Map<String, int>? editingShares;
 
   const SplitMethodSelector({
     required this.onSelect,
@@ -1139,6 +1760,10 @@ class SplitMethodSelector extends StatefulWidget {
     required this.groupMembers,
     required this.totalAmount,
     required this.currency,
+    this.editingSplitAmounts,
+    this.editingSelectedMembers,
+    this.editingPercentages,
+    this.editingShares,
     Key? key,
   }) : super(key: key);
 
@@ -1175,9 +1800,39 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     super.initState();
     _selectedMethodInSelector = widget.initialSelectedMethod;
 
-    // Initialize all members as selected for Evenly
-    for (var member in widget.groupMembers) {
-      selectedMembers.add(member['email']);
+    // Initialize data based on editing state
+    if (widget.editingSelectedMembers != null && widget.editingSelectedMembers!.isNotEmpty) {
+      // Use editing data
+      selectedMembers = Set.from(widget.editingSelectedMembers!);
+
+      if (widget.editingSplitAmounts != null) {
+        memberAmounts = Map.from(widget.editingSplitAmounts!);
+        // Initialize controllers with existing amounts
+        for (var entry in memberAmounts.entries) {
+          amountControllers[entry.key] = TextEditingController(text: entry.value.toStringAsFixed(2));
+        }
+      }
+
+      if (widget.editingPercentages != null) {
+        memberPercentages = Map.from(widget.editingPercentages!);
+        // Initialize controllers with existing percentages
+        for (var entry in memberPercentages.entries) {
+          percentageControllers[entry.key] = TextEditingController(text: entry.value.toStringAsFixed(2));
+        }
+      }
+
+      if (widget.editingShares != null) {
+        memberShares = Map.from(widget.editingShares!);
+        // Initialize controllers with existing shares
+        for (var entry in memberShares.entries) {
+          shareControllers[entry.key] = TextEditingController(text: entry.value.toString());
+        }
+      }
+    } else {
+      // Initialize all members as selected for Evenly (default behavior)
+      for (var member in widget.groupMembers) {
+        selectedMembers.add(member['email']);
+      }
     }
   }
 
@@ -1206,11 +1861,85 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
   }
 
   double get totalPercentage {
-    return memberPercentages.values.fold(0.0, (sum, percentage) => sum + percentage);
+    return memberPercentages.values.fold(
+      0.0,
+      (sum, percentage) => sum + percentage,
+    );
   }
 
   int get totalShares {
     return memberShares.values.fold(0, (sum, shares) => sum + shares);
+  }
+
+  List<Map<String, dynamic>> _generateSplitData() {
+    final splitData = <Map<String, dynamic>>[];
+
+    switch (_selectedMethodInSelector) {
+      case 'Evenly':
+        final amountPerPerson = evenlyAmountPerPerson;
+        for (var member in widget.groupMembers) {
+          final memberEmail = member['email'];
+          if (selectedMembers.contains(memberEmail)) {
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'amount': amountPerPerson,
+              'method': 'equally',
+            });
+          }
+        }
+        break;
+
+      case 'Custom Amount':
+        for (var member in widget.groupMembers) {
+          final memberEmail = member['email'];
+          final amount = memberAmounts[memberEmail];
+          if (amount != null && amount > 0) {
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'amount': amount,
+              'method': 'custom',
+            });
+          }
+        }
+        break;
+
+      case 'Percentage':
+        for (var member in widget.groupMembers) {
+          final memberEmail = member['email'];
+          final percentage = memberPercentages[memberEmail];
+          if (percentage != null && percentage > 0) {
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'percentage': percentage,
+              'amount': (percentage / 100.0) * widget.totalAmount,
+              'method': 'percentage',
+            });
+          }
+        }
+        break;
+
+      case 'Shares':
+        final totalSharesCount = totalShares;
+        for (var member in widget.groupMembers) {
+          final memberEmail = member['email'];
+          final shares = memberShares[memberEmail];
+          if (shares != null && shares > 0) {
+            splitData.add({
+              'email': memberEmail,
+              'name': member['name'],
+              'shares': shares,
+              'amount': totalSharesCount > 0 ? (shares / totalSharesCount) * widget.totalAmount : 0.0,
+              'method': 'shares',
+            });
+          }
+        }
+        break;
+    }
+
+    return splitData;
   }
 
   Widget _buildMethodOption(String method) {
@@ -1227,7 +1956,7 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
           color: Color.fromARGB(255, 37, 37, 39),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? Colors.deepPurple : Colors.grey.shade700,
+            color: isSelected ? Color(0xFF7F55FF) : Colors.grey.shade700,
             width: isSelected ? 2.0 : 1.0,
           ),
         ),
@@ -1250,29 +1979,23 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                   if (isSelected)
                     Icon(Icons.check_circle, color: Colors.deepPurple, size: 24)
                   else
-                    Icon(Icons.radio_button_unchecked, color: Colors.grey, size: 24),
+                    Icon(
+                      Icons.radio_button_unchecked,
+                      color: Colors.grey,
+                      size: 24,
+                    ),
                 ],
               ),
             ),
 
-            // Expanded details if selected
             if (isSelected) ...[
-              // Members list
               ...widget.groupMembers.map((member) => _buildMemberItem(member)),
-
-              // Summary
-              Container(
-                padding: EdgeInsets.all(16),
-                child: _buildSummaryContent(),
-              ),
             ],
           ],
         ),
       ),
     );
   }
-
-
 
   Widget _buildMemberItem(Map<String, dynamic> member) {
     final memberName = member['name'] as String;
@@ -1366,8 +2089,11 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
             child: TextField(
               controller: controller,
               keyboardType: TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
               decoration: InputDecoration(
-                hintText: '0.0',
+                hintText: '0.00',
                 hintStyle: TextStyle(color: Colors.white70, fontSize: 14),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -1381,10 +2107,25 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.deepPurple, width: 2),
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
                 isDense: true,
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
+              onTap: () {
+                // 延迟滚动，等待键盘弹出
+                Future.delayed(Duration(milliseconds: 300), () {
+                  if (widget.scrollController.hasClients) {
+                    widget.scrollController.animateTo(
+                      widget.scrollController.position.maxScrollExtent,
+                      duration: Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  }
+                });
+              },
               onChanged: (value) {
                 final amount = double.tryParse(value) ?? 0.0;
                 setState(() {
@@ -1407,6 +2148,8 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
       percentageControllers[memberEmail] = TextEditingController();
     }
     final controller = percentageControllers[memberEmail]!;
+    final percentage = memberPercentages[memberEmail] ?? 0.0;
+    final memberAmount = (percentage / 100.0) * widget.totalAmount;
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1426,7 +2169,7 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                   ),
                 ),
                 Text(
-                  '${widget.currency} 0',
+                  '${widget.currency} ${memberAmount.toStringAsFixed(2)}',
                   style: TextStyle(fontSize: 14, color: Colors.white70),
                 ),
               ],
@@ -1437,8 +2180,11 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
             child: TextField(
               controller: controller,
               keyboardType: TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
               decoration: InputDecoration(
-                hintText: '0.0%',
+                hintText: '0.00%',
                 hintStyle: TextStyle(color: Colors.white70, fontSize: 14),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -1452,10 +2198,25 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.deepPurple, width: 2),
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
                 isDense: true,
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
+              onTap: () {
+                // 延迟滚动，等待键盘弹出
+                Future.delayed(Duration(milliseconds: 300), () {
+                  if (widget.scrollController.hasClients) {
+                    widget.scrollController.animateTo(
+                      widget.scrollController.position.maxScrollExtent,
+                      duration: Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  }
+                });
+              },
               onChanged: (value) {
                 final percentage = double.tryParse(value) ?? 0.0;
                 setState(() {
@@ -1479,7 +2240,9 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     }
     final controller = shareControllers[memberEmail]!;
     final shares = memberShares[memberEmail] ?? 0;
-    final amountPerShare = totalShares > 0 ? widget.totalAmount / totalShares : 0.0;
+    final amountPerShare = totalShares > 0
+        ? widget.totalAmount / totalShares
+        : 0.0;
     final memberAmount = shares * amountPerShare;
 
     return Container(
@@ -1510,9 +2273,12 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
             flex: 1,
             child: TextField(
               controller: controller,
-              keyboardType: TextInputType.number,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
               decoration: InputDecoration(
-                hintText: '0.0',
+                hintText: '0.00',
                 hintStyle: TextStyle(color: Colors.white70, fontSize: 14),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -1526,10 +2292,25 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.deepPurple, width: 2),
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
                 isDense: true,
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
+              onTap: () {
+                // 延迟滚动，等待键盘弹出
+                Future.delayed(Duration(milliseconds: 300), () {
+                  if (widget.scrollController.hasClients) {
+                    widget.scrollController.animateTo(
+                      widget.scrollController.position.maxScrollExtent,
+                      duration: Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  }
+                });
+              },
               onChanged: (value) {
                 final shareCount = int.tryParse(value) ?? 0;
                 setState(() {
@@ -1551,23 +2332,25 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     switch (_selectedMethodInSelector) {
       case 'Evenly':
         final hasSelectedMembers = selectedMembers.isNotEmpty;
-        return Text(
-          '${widget.currency} ${evenlyAmountPerPerson.toStringAsFixed(2)}/person\n(${selectedMembers.length} people)',
-          style: TextStyle(
-            fontSize: 16,
-            color: hasSelectedMembers ? Color.fromARGB(163, 14, 188, 109) : Colors.red,
-            fontWeight: FontWeight.w600,
-          ),
-          textAlign: TextAlign.center,
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildSummaryItem('Per Person', evenlyAmountPerPerson),
+            _buildEvenlyPeopleItem('People', selectedMembers.length, hasSelectedMembers),
+          ],
         );
       case 'Custom Amount':
         final remaining = widget.totalAmount - totalUnequally;
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildSummaryItem('Total', widget.totalAmount),
-            _buildSummaryItem('Divided', totalUnequally),
-            _buildSummaryItemWithColor('Remaining', remaining, remaining == 0.0 ? Color.fromARGB(163, 14, 188, 109) : Colors.red),
+            _buildSummaryItemWithColor('Total', widget.totalAmount, Colors.white70),
+            _buildSummaryItemWithColor('Divided', totalUnequally, Colors.white70),
+            _buildSummaryItemWithColor(
+              'Remaining',
+              remaining,
+              remaining == 0.0 ? Color.fromARGB(163, 14, 188, 109) : Colors.red,
+            ),
           ],
         );
       case 'Percentage':
@@ -1575,18 +2358,22 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildSummaryItem('Total Percentage', 100.0, isPercentage: true),
-            _buildSummaryItem('Divided', totalPercentage, isPercentage: true),
-            _buildSummaryItemWithColor('Remaining', remaining, remaining == 0.0 ? Color.fromARGB(163, 14, 188, 109) : Colors.red, isPercentage: true),
+            _buildSummaryItemWithColor('Total', 100.0, Colors.white70, isPercentage: true),
+            _buildSummaryItemWithColor('Divided', totalPercentage, Colors.white70, isPercentage: true),
+            _buildSummaryItemWithColor(
+              'Remaining',
+              remaining,
+              remaining == 0.0 ? Color.fromARGB(163, 14, 188, 109) : Colors.red,
+              isPercentage: true,
+            ),
           ],
         );
       case 'Shares':
-        final hasShares = totalShares > 0;
         return Text(
           '$totalShares Total Shares',
           style: TextStyle(
             fontSize: 16,
-            color: hasShares ? Color.fromARGB(163, 14, 188, 109) : Colors.red,
+            color: Colors.white70,
             fontWeight: FontWeight.w600,
           ),
           textAlign: TextAlign.center,
@@ -1596,9 +2383,11 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     }
   }
 
-
-
-  Widget _buildSummaryItem(String label, double value, {bool isPercentage = false}) {
+  Widget _buildSummaryItem(
+    String label,
+    double value, {
+    bool isPercentage = false,
+  }) {
     return Column(
       children: [
         Text(
@@ -1616,7 +2405,7 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
               : '${widget.currency} ${value.toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 14,
-            color: Colors.white,
+            color: Color.fromARGB(163, 14, 188, 109),
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -1624,7 +2413,12 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     );
   }
 
-  Widget _buildSummaryItemWithColor(String label, double value, Color color, {bool isPercentage = false}) {
+  Widget _buildSummaryItemWithColor(
+    String label,
+    double value,
+    Color color, {
+    bool isPercentage = false,
+  }) {
     return Column(
       children: [
         Text(
@@ -1650,6 +2444,32 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     );
   }
 
+  Widget _buildEvenlyPeopleItem(String label, int count, bool hasSelectedMembers) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.white70,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          '$count',
+          style: TextStyle(
+            fontSize: 14,
+            color: hasSelectedMembers ? Colors.white : Colors.red,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+
+
+
   bool _canConfirm() {
     switch (_selectedMethodInSelector) {
       case 'Evenly':
@@ -1667,73 +2487,144 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
 
   @override
   Widget build(BuildContext context) {
+    // Check if keyboard is visible
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final isKeyboardVisible = keyboardHeight > 0;
+
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Color.fromARGB(255, 39, 39, 40),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
+      child: Stack(
         children: [
-          // Drag indicator
-          Container(
-            width: 40,
-            height: 4,
-            margin: EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade600,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Text(
-            'Select Split Method',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          SizedBox(height: 16),
-
-          Expanded(
-            child: SingleChildScrollView(
-              controller: widget.scrollController,
-              child: Column(
-                children: [
-                  // Split method options with expanded details
-                  ...splitMethods.map((method) => _buildMethodOption(method)),
-
-                  SizedBox(height: 20),
-                ],
-              ),
-            ),
-          ),
-
-          // DONE button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _canConfirm() ? () {
-                widget.onSelect(_selectedMethodInSelector!, context);
-              } : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Color.fromARGB(164, 92, 56, 200),
-                disabledBackgroundColor: Color.fromARGB(36, 92, 56, 200),
-                padding: EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          Column(
+            children: [
+              // Drag indicator
+              Container(
+                width: 40,
+                height: 4,
+                margin: EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade600,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              child: Text(
-                'Confirm',
+              Text(
+                'Select Split Method',
                 style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
+                  fontSize: 20,
                   fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(height: 16),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: widget.scrollController,
+                  padding: EdgeInsets.only(
+                    bottom: isKeyboardVisible ? 300 : 20, // 为浮动总结和键盘留出空间
+                  ),
+                  child: Column(
+                    children: [
+                      // Split method options with expanded details
+                      ...splitMethods.map(
+                        (method) => _buildMethodOption(method),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Summary section (only when method is selected and keyboard is not visible)
+              if (_selectedMethodInSelector != null && !isKeyboardVisible) ...[
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Color.fromARGB(255, 39, 39, 40),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: _buildSummaryContent(),
+                ),
+                SizedBox(height: 16),
+              ],
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _canConfirm()
+                      ? () {
+                          final splitData = _generateSplitData();
+                          widget.onSelect(_selectedMethodInSelector!, context, splitData);
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color.fromARGB(164, 92, 56, 200),
+                    disabledBackgroundColor: Color.fromARGB(36, 92, 56, 200),
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Confirm',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          // Floating summary when keyboard is visible
+          if (_selectedMethodInSelector != null && isKeyboardVisible)
+            Positioned(
+              bottom: keyboardHeight - 16,
+              left: -20,
+              right: -10,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                decoration: BoxDecoration(
+                  color: Color.fromARGB(255, 39, 39, 40),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(child: _buildSummaryContent()),
+                    SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        // Dismiss keyboard
+                        FocusScope.of(context).unfocus();
+                      },
+                      child: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade700,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Icon(
+                          Icons.keyboard_hide,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1788,10 +2679,7 @@ class _PaidBySelectorState extends State<PaidBySelector> {
         decoration: BoxDecoration(
           color: Color.fromARGB(255, 37, 37, 39),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.grey.shade700,
-            width: 1.0,
-          ),
+          border: Border.all(color: Colors.grey.shade700, width: 1.0),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1827,10 +2715,7 @@ class _PaidBySelectorState extends State<PaidBySelector> {
       decoration: BoxDecoration(
         color: Color.fromARGB(255, 37, 37, 39),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.grey.shade700,
-          width: 1.0,
-        ),
+        border: Border.all(color: Colors.grey.shade700, width: 1.0),
       ),
       child: Row(
         children: [
@@ -1860,6 +2745,9 @@ class _PaidBySelectorState extends State<PaidBySelector> {
             child: TextField(
               controller: controller,
               keyboardType: TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
               decoration: InputDecoration(
                 labelText: 'Amount',
                 labelStyle: TextStyle(color: Colors.white70, fontSize: 12),
@@ -1884,12 +2772,31 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                 isDense: true,
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
+              onTap: () {
+                // 延迟滚动，等待键盘弹出
+                Future.delayed(Duration(milliseconds: 500), () {
+                  if (widget.scrollController.hasClients) {
+                    // 滚动到最大位置，确保最后的输入框可见
+                    final maxScroll = widget.scrollController.position.maxScrollExtent;
+                    widget.scrollController.animateTo(
+                      maxScroll,
+                      duration: Duration(milliseconds: 400),
+                      curve: Curves.easeInOut,
+                    );
+                  }
+                });
+              },
               onChanged: (value) {
                 final amount = double.tryParse(value) ?? 0.0;
                 setState(() {
                   if (amount > 0) {
                     // 检查是否超过总金额
-                    final currentDivided = multiplePayers.values.fold(0.0, (sum, amt) => sum + amt) - (multiplePayers[memberEmail] ?? 0.0);
+                    final currentDivided =
+                        multiplePayers.values.fold(
+                          0.0,
+                          (sum, amt) => sum + amt,
+                        ) -
+                        (multiplePayers[memberEmail] ?? 0.0);
                     if (currentDivided + amount > widget.totalAmount) {
                       // 超过总金额时，设置为剩余金额
                       final maxAllowed = widget.totalAmount - currentDivided;
@@ -1919,7 +2826,10 @@ class _PaidBySelectorState extends State<PaidBySelector> {
     if (paidByType == 'Single') {
       return selectedSinglePayer != null;
     } else if (paidByType == 'Multiple') {
-      final divided = multiplePayers.values.fold(0.0, (sum, amount) => sum + amount);
+      final divided = multiplePayers.values.fold(
+        0.0,
+        (sum, amount) => sum + amount,
+      );
       final remaining = widget.totalAmount - divided;
       return multiplePayers.isNotEmpty && remaining == 0.0;
     }
@@ -1935,7 +2845,12 @@ class _PaidBySelectorState extends State<PaidBySelector> {
     return remaining < 0 ? 0.0 : remaining;
   }
 
-  Widget _buildSummaryItem(String label, double amount, String currency, Color color) {
+  Widget _buildSummaryItem(
+    String label,
+    double amount,
+    String currency,
+    Color color,
+  ) {
     return Column(
       children: [
         Text(
@@ -1970,181 +2885,285 @@ class _PaidBySelectorState extends State<PaidBySelector> {
 
   @override
   Widget build(BuildContext context) {
+    // Check if keyboard is visible
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final isKeyboardVisible = keyboardHeight > 0;
+
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Color.fromARGB(255, 39, 39, 40),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Stack(
         children: [
-          // Drag indicator
-          Container(
-            width: 40,
-            height: 4,
-            margin: EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade600,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Text(
-            'Select Payer',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          SizedBox(height: 16),
-
-          // Single vs Multiple payer selection
-          Row(
+          Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      paidByType = 'Single';
-                      selectedSinglePayer = null;
-                      multiplePayers.clear();
-                      // 清空所有输入框
-                      for (var controller in controllers.values) {
-                        controller.clear();
-                      }
-                      controllers.clear();
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: paidByType == 'Single'
-                        ? Color(0xFF7F55FF)
-                        : Colors.grey.shade800,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: Text('Single'),
+              // Drag indicator
+              Container(
+                width: 40,
+                height: 4,
+                margin: EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade600,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      paidByType = 'Multiple';
-                      selectedSinglePayer = null;
-                      multiplePayers.clear();
-                      // 清空所有输入框
-                      for (var controller in controllers.values) {
-                        controller.clear();
-                      }
-                      controllers.clear();
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: paidByType == 'Multiple'
-                        ? Color(0xFF7F55FF)
-                        : Colors.grey.shade800,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: Text('Multiple'),
+              Text(
+                'Select Payer',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
                 ),
               ),
+              SizedBox(height: 16),
+
+              // Single vs Multiple payer selection
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          paidByType = 'Single';
+                          selectedSinglePayer = null;
+                          multiplePayers.clear();
+                          // 清空所有输入框
+                          for (var controller in controllers.values) {
+                            controller.clear();
+                          }
+                          controllers.clear();
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: paidByType == 'Single'
+                            ? Color(0xFF7F55FF)
+                            : Colors.grey.shade800,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: Text('Single'),
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          paidByType = 'Multiple';
+                          selectedSinglePayer = null;
+                          multiplePayers.clear();
+                          // 清空所有输入框
+                          for (var controller in controllers.values) {
+                            controller.clear();
+                          }
+                          controllers.clear();
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: paidByType == 'Multiple'
+                            ? Color(0xFF7F55FF)
+                            : Colors.grey.shade800,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: Text('Multiple'),
+                    ),
+                  ),
+                ],
+              ),
+
+              SizedBox(height: 16),
+
+              // Show members list if payer type is selected
+              if (paidByType != null && widget.groupMembers.isNotEmpty) ...[
+                Text(
+                  paidByType == 'Single'
+                      ? 'Select who paid:'
+                      : 'Select who paid and amounts:',
+                  style: TextStyle(fontSize: 16, color: Colors.white70),
+                ),
+                SizedBox(height: 12),
+                Expanded(
+                  child: ListView.builder(
+                    controller: widget.scrollController,
+                    padding: EdgeInsets.only(
+                      bottom: isKeyboardVisible ? 400 : 20, // 为浮动总结和键盘留出空间
+                    ),
+                    itemCount: widget.groupMembers.length,
+                    itemBuilder: (context, index) {
+                      final member = widget.groupMembers[index];
+                      final memberName = member['name'] as String;
+                      final memberEmail = member['email'] as String;
+
+                      if (paidByType == 'Single') {
+                        return _buildSinglePayerItem(memberName, memberEmail);
+                      } else {
+                        return _buildMultiplePayerItem(memberName, memberEmail);
+                      }
+                    },
+                  ),
+                ),
+
+                // 只在 Multiple 模式时显示总结信息和 Confirm 按钮
+                if (paidByType == 'Multiple' && !isKeyboardVisible) ...[
+                  SizedBox(height: 16),
+
+                  // Total, Divided, Remaining 显示（只在键盘不可见时显示）
+                  Container(
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Color.fromARGB(255, 39, 39, 40),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildSummaryItem(
+                          'Total',
+                          widget.totalAmount,
+                          widget.currency,
+                          Colors.white70,
+                        ),
+                        _buildSummaryItem(
+                          'Divided',
+                          _getDividedAmount(),
+                          widget.currency,
+                          Colors.white70,
+                        ),
+                        _buildSummaryItem(
+                          'Remaining',
+                          _getRemainingAmount(),
+                          widget.currency,
+                          _getRemainingAmount() == 0.0
+                              ? Color.fromARGB(163, 14, 188, 109)
+                              : Colors.red,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  SizedBox(height: 16),
+
+                  // Confirm button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _canConfirmPaidBy()
+                          ? () {
+                              widget.onConfirm(
+                                paidByType,
+                                selectedSinglePayer,
+                                multiplePayers,
+                              );
+                            }
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Color.fromARGB(164, 92, 56, 200),
+                        disabledBackgroundColor: Color.fromARGB(
+                          36,
+                          92,
+                          56,
+                          200,
+                        ),
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Confirm',
+                        style: TextStyle(
+                          color: const Color.fromARGB(255, 255, 255, 255),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ],
           ),
 
-          SizedBox(height: 16),
-
-          // Show members list if payer type is selected
-          if (paidByType != null && widget.groupMembers.isNotEmpty) ...[
-            Text(
-              paidByType == 'Single'
-                  ? 'Select who paid:'
-                  : 'Select who paid and amounts:',
-              style: TextStyle(fontSize: 16, color: Colors.white70),
-            ),
-            SizedBox(height: 12),
-            Expanded(
-              child: ListView.builder(
-                controller: widget.scrollController,
-                itemCount: widget.groupMembers.length,
-                itemBuilder: (context, index) {
-                  final member = widget.groupMembers[index];
-                  final memberName = member['name'] as String;
-                  final memberEmail = member['email'] as String;
-
-                  if (paidByType == 'Single') {
-                    return _buildSinglePayerItem(memberName, memberEmail);
-                  } else {
-                    return _buildMultiplePayerItem(memberName, memberEmail);
-                  }
-                },
-              ),
-            ),
-
-            // 只在 Multiple 模式时显示总结信息和 Confirm 按钮
-            if (paidByType == 'Multiple') ...[
-              SizedBox(height: 16),
-
-              // Total, Divided, Remaining 显示
-              Container(
-                padding: EdgeInsets.all(10),
+          // 浮动的 Total/Divided/Remaining 显示（只在 Multiple 模式且键盘可见时显示）
+          if (paidByType == 'Multiple' && isKeyboardVisible)
+            Positioned(
+              bottom: keyboardHeight - 16,
+              left: -20,
+              right: -10,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 decoration: BoxDecoration(
                   color: Color.fromARGB(255, 39, 39, 40),
-                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildSummaryItem('Total', widget.totalAmount, widget.currency, Colors.white70),
-                    _buildSummaryItem('Divided', _getDividedAmount(), widget.currency, Colors.white70),
-                    _buildSummaryItem('Remaining', _getRemainingAmount(), widget.currency, _getRemainingAmount() == 0.0 ? Color.fromARGB(163, 14, 188, 109) : Colors.red),
+                    Expanded(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildSummaryItem(
+                            'Total',
+                            widget.totalAmount,
+                            widget.currency,
+                            Colors.white70,
+                          ),
+                          _buildSummaryItem(
+                            'Divided',
+                            _getDividedAmount(),
+                            widget.currency,
+                            Colors.white70,
+                          ),
+                          _buildSummaryItem(
+                            'Remaining',
+                            _getRemainingAmount(),
+                            widget.currency,
+                            _getRemainingAmount() == 0.0
+                                ? Color.fromARGB(163, 14, 188, 109)
+                                : Colors.red,
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        // Dismiss keyboard
+                        FocusScope.of(context).unfocus();
+                      },
+                      child: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade700,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Icon(
+                          Icons.keyboard_hide,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-
-              SizedBox(height: 16),
-
-              // Confirm button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _canConfirmPaidBy()
-                      ? () {
-                          widget.onConfirm(
-                            paidByType,
-                            selectedSinglePayer,
-                            multiplePayers,
-                          );
-                        }
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color.fromARGB(164, 92, 56, 200),
-                    disabledBackgroundColor: Color.fromARGB(36, 92, 56, 200),
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'Confirm',
-                    style: TextStyle(
-                      color: const Color.fromARGB(255, 255, 255, 255),
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
+            ),
         ],
       ),
     );

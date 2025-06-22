@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'transaction_page.dart';
 import 'scan_page.dart';
 import 'group_detail_page.dart';
-import 'create_expense_form.dart';
+
+import 'add_new_group_page.dart';
+import 'friends_page.dart';
+import 'profile_page.dart';
 import 'dart:convert';
+import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class GroupPage extends StatefulWidget {
@@ -15,11 +19,93 @@ class GroupPage extends StatefulWidget {
 
 class GroupPageState extends State<GroupPage> {
   List<Map<String, dynamic>> groups = [];
+  UserProfile? userProfile;
+
+  // Calculate total amounts owed and owing
+  Map<String, double> _calculateTotalBalances() {
+    double youOwe = 0.0;
+    double owesYou = 0.0;
+
+    for (var group in groups) {
+      final expenses = group['expenses'] as List<dynamic>? ?? [];
+      final members = group['members'] as List<dynamic>? ?? [];
+
+      // Find current user's email
+      String currentUserEmail = '';
+      for (var member in members) {
+        if (member['isCurrentUser'] == true) {
+          currentUserEmail = member['email'];
+          break;
+        }
+      }
+
+      if (currentUserEmail.isEmpty) continue;
+
+      // Calculate balance for this group
+      double balance = 0.0;
+
+      for (var expense in expenses) {
+        final paidBy = expense['paidBy'] as Map<String, dynamic>? ?? {};
+        final split = expense['split'] as List<dynamic>? ?? [];
+
+        // Calculate how much current user paid
+        double userPaid = 0.0;
+        if (paidBy['type'] == 'single' && paidBy['payer'] == currentUserEmail) {
+          userPaid = paidBy['amount'] as double? ?? 0.0;
+        } else if (paidBy['type'] == 'multiple') {
+          final payers = paidBy['payers'] as Map<String, dynamic>? ?? {};
+          userPaid = payers[currentUserEmail] as double? ?? 0.0;
+        }
+
+        // Calculate how much current user owes
+        double userOwes = 0.0;
+        for (var splitItem in split) {
+          if (splitItem['email'] == currentUserEmail) {
+            userOwes = splitItem['amount'] as double? ?? 0.0;
+            break;
+          }
+        }
+
+        // Add to balance (positive = owed to user, negative = user owes)
+        balance += userPaid - userOwes;
+      }
+
+      // Add to totals
+      if (balance > 0) {
+        owesYou += balance;
+      } else if (balance < 0) {
+        youOwe += -balance;
+      }
+    }
+
+    return {
+      'youOwe': youOwe,
+      'owesYou': owesYou,
+    };
+  }
 
   @override
   void initState() {
     super.initState();
     _loadGroups();
+    _loadUserProfile();
+  }
+
+  Future<void> _loadUserProfile() async {
+    final profile = await ProfileManager.loadProfile();
+    setState(() {
+      userProfile = profile;
+    });
+  }
+
+  ImageProvider _getAvatarImage() {
+    if (userProfile?.localAvatarPath != null) {
+      return FileImage(File(userProfile!.localAvatarPath!));
+    } else if (userProfile?.avatarUrl != null) {
+      return NetworkImage(userProfile!.avatarUrl!);
+    } else {
+      return NetworkImage('https://randomuser.me/api/portraits/men/32.jpg');
+    }
   }
 
   Future<void> _loadGroups() async {
@@ -101,19 +187,57 @@ class GroupPageState extends State<GroupPage> {
                       radius: 18,
                       backgroundColor: Colors.white,
                       child: IconButton(
-                        icon: const Icon(Icons.add, color: Color(0xFF7F55FF)),
+                        icon: const Icon(Icons.group_add, color: Color(0xFF7F55FF)),
+                        onPressed: () async {
+                          final newGroup = await Navigator.push<Group>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const AddNewGroupPage(),
+                            ),
+                          );
+
+                          if (newGroup != null) {
+                            // Convert to Map and add to groups
+                            final groupMap = await newGroup.toJson();
+
+                            // Save to SharedPreferences
+                            final prefs = await SharedPreferences.getInstance();
+                            final savedGroups = prefs.getStringList('groups') ?? [];
+                            savedGroups.add(json.encode(groupMap));
+                            await prefs.setStringList('groups', savedGroups);
+
+                            // Update the local groups list
+                            if (mounted) {
+                              setState(() {
+                                groups.add(groupMap);
+                              });
+
+                              // Show success message
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Group "${newGroup.name}" created successfully!'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        iconSize: 22,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.only(right: 10),
+                    child: CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.white,
+                      child: IconButton(
+                        icon: const Icon(Icons.people, color: Color(0xFF7F55FF)),
                         onPressed: () {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => CreateExpenseForm(
-                                groups: groups
-                                    .map((g) => g['name'] as String)
-                                    .toList(),
-                                onExpenseCreated: () {
-                                  _loadGroups(); 
-                                },
-                              ),
+                              builder: (context) => const FriendsPage(),
                             ),
                           );
                         },
@@ -121,10 +245,23 @@ class GroupPageState extends State<GroupPage> {
                       ),
                     ),
                   ),
-                  const CircleAvatar(
-                    radius: 20,
-                    backgroundImage: NetworkImage(
-                      'https://randomuser.me/api/portraits/men/32.jpg',
+                  GestureDetector(
+                    onTap: () async {
+                      final updatedProfile = await Navigator.push<UserProfile>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ProfilePage(),
+                        ),
+                      );
+                      if (updatedProfile != null) {
+                        setState(() {
+                          userProfile = updatedProfile;
+                        });
+                      }
+                    },
+                    child: CircleAvatar(
+                      radius: 20,
+                      backgroundImage: _getAvatarImage(),
                     ),
                   ),
                 ],
@@ -143,9 +280,9 @@ class GroupPageState extends State<GroupPage> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.center,
-                        children: const [
+                        children: [
                           Text(
-                            'RM 2567.58',
+                            'RM ${_calculateTotalBalances()['youOwe']!.toStringAsFixed(2)}',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -176,9 +313,9 @@ class GroupPageState extends State<GroupPage> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.center,
-                        children: const [
+                        children: [
                           Text(
-                            'RM 2826.43',
+                            'RM ${_calculateTotalBalances()['owesYou']!.toStringAsFixed(2)}',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -200,7 +337,7 @@ class GroupPageState extends State<GroupPage> {
                 ],
               ),
               const SizedBox(height: 24),
-              ...groups.map((group) => _buildGroupCard(group)).toList(),
+              ...groups.map((group) => _buildGroupCard(group)),
               const SizedBox(height: 24),
             ],
           ),
@@ -329,9 +466,15 @@ class GroupPageState extends State<GroupPage> {
 
   // Group card
   Widget _buildGroupCard(Map<String, dynamic> group) {
+    // Recalculate group details for display
+    final recalculatedData = _recalculateGroupSettlement(group);
+    final updatedGroup = Map<String, dynamic>.from(group);
+    updatedGroup['details'] = recalculatedData['details'];
+    updatedGroup['status'] = recalculatedData['status'];
+
     return GestureDetector(
-      onTap: () {
-        Navigator.of(context).push(
+      onTap: () async {
+        final updatedGroupFromDetail = await Navigator.of(context).push<Map<String, dynamic>>(
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) =>
                 GroupDetailPage(
@@ -353,6 +496,16 @@ class GroupPageState extends State<GroupPage> {
             transitionDuration: Duration(milliseconds: 200),
           ),
         );
+
+        // 如果有更新的group数据返回，更新本地groups列表
+        if (updatedGroupFromDetail != null) {
+          setState(() {
+            final groupIndex = groups.indexWhere((g) => g['name'] == group['name']);
+            if (groupIndex != -1) {
+              groups[groupIndex] = updatedGroupFromDetail;
+            }
+          });
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
@@ -374,6 +527,7 @@ class GroupPageState extends State<GroupPage> {
             Row(
               children: [
                 CircleAvatar(
+                  radius: 20,
                   backgroundColor: Colors.grey[200],
                   child: Icon(Icons.house, color: Colors.deepOrangeAccent),
                 ),
@@ -409,11 +563,11 @@ class GroupPageState extends State<GroupPage> {
               ],
             ),
             const SizedBox(height: 12),
-            if (group['details'] != null &&
-                (group['details'] as List).isNotEmpty)
-              ...(group['details'] as List).map<Widget>(
+            if (updatedGroup['details'] != null &&
+                (updatedGroup['details'] as List).isNotEmpty)
+              ...(updatedGroup['details'] as List).map<Widget>(
                 (detail) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.only(bottom: 4, left: 8),
                   child: Row(
                     children: [
                       CircleAvatar(
@@ -430,9 +584,9 @@ class GroupPageState extends State<GroupPage> {
                           color: Colors.blueGrey,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 12),
                       Text(
-                        '${detail['name'] ?? ''} ${detail['text'] ?? ''}',
+                        detail['name'] ?? 'Unknown',
                         style: const TextStyle(fontSize: 14),
                       ),
                       const Spacer(),
@@ -447,29 +601,31 @@ class GroupPageState extends State<GroupPage> {
                   ),
                 ),
               ),
-            if (group['details'] == null || (group['details'] as List).isEmpty)
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: group['status']?['color'] != null
-                      ? Color(group['status']['color'] as int)
-                      : Colors.grey[300],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  group['status']?['text'] ?? 'No expenses yet',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
+            if (updatedGroup['details'] == null || (updatedGroup['details'] as List).isEmpty)
+              // Only show middle bar if NOT settled up
+              if (updatedGroup['status']?['text'] != 'Settled up')
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: updatedGroup['status']?['color'] != null
+                        ? Color(updatedGroup['status']['color'] as int)
+                        : Colors.grey[300],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    updatedGroup['status']?['text'] ?? 'No expenses yet',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
-              ),
-            if (group['status'] != null && group['status']['amount'] != null)
+            if (updatedGroup['status'] != null && updatedGroup['status']['amount'] != null)
               Container(
                 margin: const EdgeInsets.only(top: 8),
                 padding: const EdgeInsets.symmetric(
@@ -477,40 +633,140 @@ class GroupPageState extends State<GroupPage> {
                   vertical: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: group['status']['color'] != null
-                      ? Color(group['status']['color'] as int)
+                  color: updatedGroup['status']['color'] != null
+                      ? Color(updatedGroup['status']['color'] as int)
                       : Colors.grey[300],
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
-                  children: [
-                    Text(
-                      group['status']['text'] ?? '',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 14,
-                        color: group['status']['color'] == 0xFFFFE0E0
-                            ? Colors.red
-                            : Colors.green,
+                alignment: updatedGroup['status']['text'] == 'Settled up'
+                    ? Alignment.center
+                    : null,
+                child: updatedGroup['status']['text'] == 'Settled up'
+                    ? Text(
+                        'Settled up',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                          color: Colors.black,
+                        ),
+                      )
+                    : Row(
+                        children: [
+                          Text(
+                            updatedGroup['status']['text'] ?? '',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                              color: updatedGroup['status']['color'] == 0xFFFFE0E0
+                                  ? Colors.red
+                                  : Colors.green,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            'RM ${updatedGroup['status']['amount']?.toStringAsFixed(2) ?? '0.00'}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: updatedGroup['status']['color'] == 0xFFFFE0E0
+                                  ? Colors.red
+                                  : Colors.green,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      'RM ${group['status']['amount']?.toStringAsFixed(2) ?? '0.00'}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: group['status']['color'] == 0xFFFFE0E0
-                            ? Colors.red
-                            : Colors.green,
-                      ),
-                    ),
-                  ],
-                ),
               ),
           ],
         ),
       ),
     );
+  }
+
+  Map<String, dynamic> _recalculateGroupSettlement(Map<String, dynamic> group) {
+    // Get expenses and group members
+    final expenses = group['expenses'] as List<dynamic>? ?? [];
+    final members = group['members'] as List<dynamic>? ?? [];
+    final memberBalances = <String, double>{};
+
+    // Find current user's email
+    String currentUserEmail = 'You';
+    for (var member in members) {
+      if (member['isCurrentUser'] == true) {
+        currentUserEmail = member['email'];
+        break;
+      }
+    }
+
+    // Initialize balances for all members
+    for (var member in members) {
+      memberBalances[member['email']] = 0.0;
+    }
+
+    // Calculate balances from all expenses
+    for (var expense in expenses) {
+      final paidBy = expense['paidBy'] as Map<String, dynamic>;
+      final split = expense['split'] as List<dynamic>;
+
+      // Add amounts paid
+      if (paidBy['type'] == 'single') {
+        final payer = paidBy['payer'] as String;
+        final amount = paidBy['amount'] as double;
+        memberBalances[payer] = (memberBalances[payer] ?? 0.0) + amount;
+      } else if (paidBy['type'] == 'multiple') {
+        final payers = paidBy['payers'] as Map<String, dynamic>;
+        payers.forEach((email, amount) {
+          memberBalances[email] = (memberBalances[email] ?? 0.0) + (amount as double);
+        });
+      }
+
+      // Subtract amounts owed
+      for (var splitItem in split) {
+        final email = splitItem['email'] as String;
+        final amount = splitItem['amount'] as double;
+        memberBalances[email] = (memberBalances[email] ?? 0.0) - amount;
+      }
+    }
+
+    // Update group details and status
+    final details = <Map<String, dynamic>>[];
+    double userBalance = memberBalances[currentUserEmail] ?? 0.0;
+
+    memberBalances.forEach((email, balance) {
+      if (balance != 0 && email != currentUserEmail) {
+        // Find member name by email
+        String memberName = email;
+        for (var member in members) {
+          if (member['email'] == email) {
+            memberName = member['name'];
+            break;
+          }
+        }
+
+        if (balance > 0) {
+          // This member has positive balance (they paid more than their share)
+          // So you owe them
+          details.add({
+            'name': 'You owe $memberName',
+            'amount': balance.abs(),
+          });
+        } else {
+          // This member has negative balance (they paid less than their share)
+          // So they owe you
+          details.add({
+            'name': '$memberName owes you',
+            'amount': balance.abs(),
+          });
+        }
+      }
+    });
+
+    return {
+      'details': details,
+      'status': {
+        'text': userBalance == 0 ? 'Settled up' : (userBalance > 0 ? 'You are owed' : 'You owe'),
+        'color': userBalance == 0 ? 0xFFE8F5E8 : (userBalance > 0 ? 0xFFE8F5E8 : 0xFFFFE0E0),
+        'amount': userBalance.abs(),
+      },
+    };
   }
 }
