@@ -650,7 +650,9 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
           if (ownerDisplayName == 'You') {
             debtText = 'You owe $payerDisplayName';
           } else {
-            debtText = '$ownerDisplayName owes $payerDisplayName';
+            // Use lowercase "you" when someone owes the current user
+            String payerText = payerDisplayName == 'You' ? 'you' : payerDisplayName;
+            debtText = '$ownerDisplayName owes $payerText';
           }
 
           debtRelationships.add({
@@ -673,9 +675,8 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
 
           final netAmount = amountPaid - amountOwed;
 
-          if (netAmount.abs() > 0.01) { // Avoid floating point precision issues
-            // Use proper display name with fallback - ensure it's never null
-            String displayName = (memberName != null && memberName.isNotEmpty) ? memberName : memberEmail;
+          if (netAmount.abs() > 0.01) { 
+            String displayName = memberName.isNotEmpty ? memberName : memberEmail;
 
             if (netAmount > 0) {
               // This person overpaid, others owe them
@@ -1602,6 +1603,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
         // Show individual split amounts
         ...split.map<Widget>((splitItem) {
           final name = splitItem['name'] as String? ?? 'Unknown';
+          final email = splitItem['email'] as String? ?? '';
           // Use finalAmount if available (for custom amounts with tax/charge), otherwise use amount
           final amount =
               splitItem['finalAmount'] as double? ??
@@ -1609,11 +1611,24 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
               0.0;
           final method = splitItem['method'] as String? ?? '';
 
-          // Show split amount (what each person should pay)
+          // Get current user email to check if this is the current user
+          String currentUserEmail = 'You';
+          final members = currentGroup['members'] as List<dynamic>? ?? [];
+          for (var member in members) {
+            if (member['isCurrentUser'] == true) {
+              currentUserEmail = member['email'];
+              break;
+            }
+          }
+
+          // "You" for current user, otherwise use name
+          String displayName = email == currentUserEmail ? 'You' : name;
+
+          // Show split amount
           String debtText;
           if (payerName == 'Multiple payers') {
-            // For multiple payers, show what each person should pay (not what they paid)
-            String payText = name == 'You' ? 'You pay' : '$name pays';
+            // For multiple payers, show what each person should pay
+            String payText = displayName == 'You' ? 'You pay' : '$displayName pays';
             if (method == 'equally') {
               debtText = '$payText ${_getDisplayCurrency()} ${(_convertAmount(amount)).toStringAsFixed(2)}';
             } else if (method == 'custom') {
@@ -1621,12 +1636,13 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
             } else {
               debtText = '$payText ${_getDisplayCurrency()} ${(_convertAmount(amount)).toStringAsFixed(2)}';
             }
-          } else if (name == payerName) {
+          } else if (displayName == payerName) {
             debtText =
-                '$name paid ${_getDisplayCurrency()} ${(_convertAmount(amount)).toStringAsFixed(2)}';
+                '$displayName paid ${_getDisplayCurrency()} ${(_convertAmount(amount)).toStringAsFixed(2)}';
           } else {
+            String payerText = payerName == 'You' ? 'you' : payerName;
             debtText =
-                '$name owes $payerName ${_getDisplayCurrency()} ${(_convertAmount(amount)).toStringAsFixed(2)}';
+                '$displayName owes $payerText ${_getDisplayCurrency()} ${(_convertAmount(amount)).toStringAsFixed(2)}';
           }
 
           return Padding(
@@ -1702,7 +1718,8 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
         if (debtorName == 'You') {
           description = 'You pay $creditorName';
         } else {
-          description = '$debtorName pays $creditorName';
+          String creditorText = creditorName == 'You' ? 'you' : creditorName;
+          description = '$debtorName pays $creditorText';
         }
 
         optimizedSettlement.add({
