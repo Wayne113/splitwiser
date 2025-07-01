@@ -6,7 +6,7 @@ Personally added functionality for service tax and charges in unequally split.
 
 ## How to use
 1. Install any IDE for Flutter, e.g. VS Code, Cursor.
-2. Run command below to meet requirements for installation and launch:
+2. Download the files and run command below to meet requirements for installation and launch:
     ```bash
    flutter doctor
    ```
