@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'group_detail_page.dart';
-import 'Functionality/add_new_group_page.dart';
-import 'Functionality/create_expense_form.dart';
+import '../Add/add_new_group_page.dart';
+import '../Add/create_expense_form.dart';
 import 'friends_page.dart';
 import 'profile_page.dart';
-import 'Functionality/currency_service.dart';
+import 'currency_service.dart';
 import '../Dashboard/dashbaord_page.dart';
 import '../Dashboard/activity_service.dart';
 

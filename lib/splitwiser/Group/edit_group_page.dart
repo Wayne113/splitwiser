@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'add_friends_page.dart';
-import '../friends_page.dart';
-import '../../Dashboard/activity_service.dart';
-import '../profile_page.dart';
+import 'friends_page.dart';
+import '../Dashboard/activity_service.dart';
+import 'profile_page.dart';
 
 class EditGroupPage extends StatefulWidget {
   final Map<String, dynamic> group;

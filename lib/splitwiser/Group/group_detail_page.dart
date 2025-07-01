@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'Functionality/settlement_page.dart';
-import 'Functionality/edit_group_page.dart';
-import 'Functionality/create_expense_form.dart';
+import 'settlement_page.dart';
+import 'edit_group_page.dart';
+import '../Add/create_expense_form.dart';
 import 'dart:math' as math;
-import 'Functionality/currency_service.dart';
+import 'currency_service.dart';
 import '../Dashboard/activity_service.dart';
 
 class GroupDetailPage extends StatefulWidget {

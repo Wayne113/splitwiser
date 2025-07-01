@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'Functionality/add_friends_page.dart';
+import 'add_friends_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 

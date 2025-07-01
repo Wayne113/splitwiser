@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:io';
-import '../../Dashboard/activity_service.dart';
+import '../Dashboard/activity_service.dart';
 
 class CreateExpenseForm extends StatefulWidget {
   final List<String> groups;

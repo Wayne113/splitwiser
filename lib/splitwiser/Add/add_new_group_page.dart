@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'add_friends_page.dart';
-import '../friends_page.dart';
-import '../profile_page.dart';
+import '../Group/add_friends_page.dart';
+import '../Group/friends_page.dart';
+import '../Group/profile_page.dart';
 
 class Group {
   final String name;

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'currency_service.dart';
-import '../../Dashboard/activity_service.dart';
+import '../Dashboard/activity_service.dart';
 
 class SettlementPage extends StatefulWidget {
   final Map<String, dynamic> group;
