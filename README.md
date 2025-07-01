@@ -9,6 +9,9 @@ Personally added functionality for service tax and charges in unequally split.
 2. Run command below to meet requirements for installation and launch:
     ```bash
    flutter doctor
+   ```
+    ```bash
+   flutter pub get
    ```  
 3. Ensure Xcode is installed in order to install and launch in iOS devices (in my case); Android Studio for android devices.
 4. Run and debug, wait SplitWiser to be installed.
