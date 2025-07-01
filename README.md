@@ -16,5 +16,5 @@ Personally added functionality for service tax and charges in unequally split.
 3. Ensure Xcode is installed in order to install and launch in iOS devices (in my case); Android Studio for android devices.
 4. Run and debug, wait SplitWiser to be installed.
 
-
+## Reminder
 💾 SplitWiser using SharedPreferences to store data locally, since it's developed for personal use to track expenses anywhere, no complex database needed!
