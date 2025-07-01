@@ -1,17 +1,15 @@
 {
   "images" : [
     {
-      "filename" : "IMG_8067 1.heic",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "IMG_8067.heic",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "IMG_8067 2.heic",
+      "filename" : "1024x1024 2.png",
       "idiom" : "universal",
       "scale" : "3x"
     }

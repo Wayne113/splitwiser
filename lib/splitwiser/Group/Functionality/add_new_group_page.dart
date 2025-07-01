@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:splitwiser/splitwiser/add_friends_page.dart';
-import 'package:splitwiser/splitwiser/friends_page.dart';
-import 'package:splitwiser/splitwiser/profile_page.dart';
+import 'add_friends_page.dart';
+import '../friends_page.dart';
+import '../profile_page.dart';
 
 class Group {
   final String name;
@@ -10,13 +10,13 @@ class Group {
   Group({required this.name, required this.members});
 
   Future<Map<String, dynamic>> toJson() async {
-    // Get current user profile
+    // Get my user profile
     final userProfile = await ProfileManager.loadProfile();
 
-    // Create a list that includes the current user plus selected friends
+    // List includes me and selected friends
     final allMembers = <Map<String, dynamic>>[];
 
-    // Add current user first
+    // Add me referring profile setting
     if (userProfile != null) {
       allMembers.add({
         'name': userProfile.name,
@@ -24,7 +24,7 @@ class Group {
         'isCurrentUser': true,
       });
     } else {
-      // Fallback if no profile is set
+      // default if profile isn't setup
       allMembers.add({
         'name': 'You',
         'email': 'you@example.com',
@@ -33,10 +33,9 @@ class Group {
     }
 
     // Add selected friends
-    allMembers.addAll(members.map((m) => {
-      ...m.toJson(),
-      'isCurrentUser': false,
-    }));
+    allMembers.addAll(
+      members.map((m) => {...m.toJson(), 'isCurrentUser': false}),
+    );
 
     return {
       'name': name,
@@ -44,7 +43,11 @@ class Group {
       'date': DateTime.now().toString().split(' ')[0],
       'total': 0.0,
       'details': <Map<String, dynamic>>[],
-      'status': {'text': 'No expenses yet', 'color': 0xFFE8F5E8, 'amount': null},
+      'status': {
+        'text': 'No expenses yet',
+        'color': 0xFFE8F5E8,
+        'amount': null,
+      },
     };
   }
 

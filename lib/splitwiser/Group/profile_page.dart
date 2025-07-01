@@ -55,7 +55,7 @@ class ProfileManager {
 }
 
 class ProfilePage extends StatefulWidget {
-  const ProfilePage({Key? key}) : super(key: key);
+  const ProfilePage({super.key});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -100,10 +100,7 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               Text(
                 'Select Photo',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               SizedBox(height: 20),
               Row(
@@ -192,9 +189,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   ImageProvider _getAvatarImage() {
-    if (_selectedImagePath != null) {
+    if (_selectedImagePath != null && File(_selectedImagePath!).existsSync()) {
       return FileImage(File(_selectedImagePath!));
-    } else if (_currentProfile?.localAvatarPath != null) {
+    } else if (_currentProfile?.localAvatarPath != null &&
+        File(_currentProfile!.localAvatarPath!).existsSync()) {
       return FileImage(File(_currentProfile!.localAvatarPath!));
     } else if (_currentProfile?.avatarUrl != null) {
       return NetworkImage(_currentProfile!.avatarUrl!);
@@ -215,6 +213,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
     await ProfileManager.saveProfile(profile);
 
+    // Update all groups with the new profile information
+    await _updateGroupsWithNewProfile(profile);
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -223,6 +224,56 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       );
       Navigator.pop(context, profile);
+    }
+  }
+
+  // Update all groups where the user is a member with new profile info
+  Future<void> _updateGroupsWithNewProfile(UserProfile newProfile) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedGroups = prefs.getStringList('groups') ?? [];
+
+      // Get the old profile to match against existing group members
+      final oldProfile = _currentProfile;
+      if (oldProfile == null) return;
+
+      bool hasUpdates = false;
+      final updatedGroups = <String>[];
+
+      for (String groupStr in savedGroups) {
+        final groupData = json.decode(groupStr) as Map<String, dynamic>;
+        final members = groupData['members'] as List<dynamic>? ?? [];
+
+        bool groupUpdated = false;
+        for (var member in members) {
+          // Update my info in group members
+          if (member['isCurrentUser'] == true ||
+              member['email'] == oldProfile.email) {
+            member['name'] = newProfile.name;
+            member['email'] = newProfile.email;
+            member['isCurrentUser'] = true;
+            groupUpdated = true;
+          }
+        }
+
+        if (groupUpdated) {
+          hasUpdates = true;
+        }
+
+        updatedGroups.add(json.encode(groupData));
+      }
+
+      // Save updated groups if there were changes
+      if (hasUpdates) {
+        await prefs.setStringList('groups', updatedGroups);
+        // Add timestamp to help other pages detect profile changes
+        await prefs.setInt(
+          'profile_change_timestamp',
+          DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+    } catch (e) {
+      print("Error updating groups with new profile: $e");
     }
   }
 
@@ -238,9 +289,7 @@ class _ProfilePageState extends State<ProfilePage> {
     if (_isLoading) {
       return Scaffold(
         backgroundColor: const Color.fromARGB(255, 39, 39, 40),
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
 
@@ -268,10 +317,7 @@ class _ProfilePageState extends State<ProfilePage> {
             Center(
               child: Stack(
                 children: [
-                  CircleAvatar(
-                    radius: 50,
-                    backgroundImage: _getAvatarImage(),
-                  ),
+                  CircleAvatar(radius: 50, backgroundImage: _getAvatarImage()),
                   Positioned(
                     bottom: 0,
                     right: 0,
@@ -281,7 +327,11 @@ class _ProfilePageState extends State<ProfilePage> {
                         shape: BoxShape.circle,
                       ),
                       child: IconButton(
-                        icon: Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                        icon: Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                         onPressed: _pickImage,
                       ),
                     ),
@@ -289,9 +339,9 @@ class _ProfilePageState extends State<ProfilePage> {
                 ],
               ),
             ),
-            
+
             SizedBox(height: 40),
-            
+
             // Name field
             TextField(
               controller: _nameController,
@@ -332,9 +382,9 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
               style: TextStyle(fontSize: 16, color: Colors.white),
             ),
-            
+
             SizedBox(height: 24),
-            
+
             // Email field
             TextField(
               controller: _emailController,
@@ -376,9 +426,9 @@ class _ProfilePageState extends State<ProfilePage> {
               style: TextStyle(fontSize: 16, color: Colors.white),
               keyboardType: TextInputType.emailAddress,
             ),
-            
+
             Spacer(),
-            
+
             // Save button
             SizedBox(
               width: double.infinity,

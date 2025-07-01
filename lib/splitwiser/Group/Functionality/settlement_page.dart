@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'currency_service.dart';
+import '../../Dashboard/activity_service.dart';
 
-class SettlementPage extends StatelessWidget {
+class SettlementPage extends StatefulWidget {
   final Map<String, dynamic> group;
   final List<Map<String, dynamic>> optimizedSettlement;
   final double totalTransactions;
   final double originalTransactions;
+  final String displayCurrency;
+  final double exchangeRate;
+  final String currencySymbol;
 
   const SettlementPage({
     Key? key,
@@ -12,7 +19,61 @@ class SettlementPage extends StatelessWidget {
     required this.optimizedSettlement,
     required this.totalTransactions,
     required this.originalTransactions,
+    required this.displayCurrency,
+    required this.exchangeRate,
+    required this.currencySymbol,
   }) : super(key: key);
+
+  @override
+  _SettlementPageState createState() => _SettlementPageState();
+}
+
+class _SettlementPageState extends State<SettlementPage> {
+  bool isSettled = false;
+  final CurrencyService _currencyService = CurrencyService();
+  String? savedDisplayCurrency;
+  double? savedExchangeRate;
+  String? savedCurrencySymbol;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCurrency();
+  }
+
+  // Load saved currency preference and override widget values if different
+  Future<void> _loadSavedCurrency() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedCurrency = prefs.getString('preferred_display_currency');
+
+      if (savedCurrency != null && savedCurrency != widget.displayCurrency) {
+        final rate = await _currencyService.getExchangeRate(
+          'MYR',
+          savedCurrency,
+        );
+        final symbol = _currencyService.getCurrencySymbol(savedCurrency);
+
+        setState(() {
+          savedDisplayCurrency = savedCurrency;
+          savedExchangeRate = rate;
+          savedCurrencySymbol = symbol;
+        });
+      }
+    } catch (e) {
+      print("Error loading saved currency in settlement, $e");
+    }
+  }
+
+  // Convert amount based on exchange rate
+  double _convertAmount(double amount) {
+    final rate = savedExchangeRate ?? widget.exchangeRate;
+    return amount * rate;
+  }
+
+  String _getCurrencySymbol() {
+    return savedCurrencySymbol ?? widget.currencySymbol;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,10 +93,7 @@ class SettlementPage extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          title: Text(
-            'Settlement Plan',
-            style: TextStyle(color: Colors.white),
-          ),
+          title: Text('Settlement Plan', style: TextStyle(color: Colors.white)),
           leading: BackButton(color: Colors.white),
         ),
         body: Padding(
@@ -43,7 +101,6 @@ class SettlementPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header card
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
@@ -71,19 +128,15 @@ class SettlementPage extends StatelessWidget {
                     ),
                     SizedBox(height: 8),
                     Text(
-                      'Minimized transactions for ${group['name']}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.black54,
-                      ),
+                      'Minimized transactions for ${widget.group['name']}',
+                      style: TextStyle(fontSize: 16, color: Colors.black54),
                     ),
-
                   ],
                 ),
               ),
-              
+
               SizedBox(height: 24),
-              
+
               // Settlement list
               Expanded(
                 child: Container(
@@ -104,8 +157,8 @@ class SettlementPage extends StatelessWidget {
                         ),
                       ),
                       SizedBox(height: 16),
-                      
-                      if (optimizedSettlement.isEmpty)
+
+                      if (widget.optimizedSettlement.isEmpty)
                         Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -137,9 +190,10 @@ class SettlementPage extends StatelessWidget {
                       else
                         Expanded(
                           child: ListView.builder(
-                            itemCount: optimizedSettlement.length,
+                            itemCount: widget.optimizedSettlement.length,
                             itemBuilder: (context, index) {
-                              final settlement = optimizedSettlement[index];
+                              final settlement =
+                                  widget.optimizedSettlement[index];
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 12),
                                 padding: const EdgeInsets.all(16),
@@ -173,7 +227,7 @@ class SettlementPage extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      'RM ${settlement['amount'].toStringAsFixed(2)}',
+                                      '${_getCurrencySymbol()} ${_convertAmount(settlement['amount']).toStringAsFixed(2)}',
                                       style: TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
@@ -190,17 +244,19 @@ class SettlementPage extends StatelessWidget {
                   ),
                 ),
               ),
-              
+
               SizedBox(height: 20),
 
-              // Action button - centered at bottom
+              // Mark as Settled button
               Center(
                 child: SizedBox(
                   width: 200,
                   child: ElevatedButton(
-                    onPressed: optimizedSettlement.isEmpty ? null : () {
-                      _markAsSettled(context);
-                    },
+                    onPressed: widget.optimizedSettlement.isEmpty
+                        ? null
+                        : () {
+                            _markAsSettled(context);
+                          },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.deepPurple,
                       foregroundColor: Colors.white,
@@ -239,15 +295,28 @@ class SettlementPage extends StatelessWidget {
               child: Text('Cancel'),
             ),
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).pop(); // Go back to group detail
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Group marked as settled!'),
-                    backgroundColor: Colors.green,
-                  ),
+              onPressed: () async {
+                Navigator.of(context).pop(); // Close confirmation dialog
+
+                // Update group status to settled
+                await _updateGroupAsSettled();
+
+                // Log settlement activity
+                await ActivityService.addSettlement(
+                  groupName: widget.group['name'],
                 );
+
+                if (mounted) {
+                  // Navigate back to group detail page with settlement result
+                  Navigator.of(context).pop(true);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Group marked as settled!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
               },
               child: Text('Confirm'),
             ),
@@ -255,5 +324,36 @@ class SettlementPage extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _updateGroupAsSettled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedGroups = prefs.getStringList('groups') ?? [];
+
+      // Find and update the current group
+      final updatedGroups = savedGroups.map((groupStr) {
+        final groupData = json.decode(groupStr) as Map<String, dynamic>;
+
+        if (groupData['name'] == widget.group['name']) {
+          // Mark group as settled by adding a settled flag
+          groupData['isSettled'] = true;
+          groupData['settledDate'] = DateTime.now().toIso8601String();
+        }
+
+        return json.encode(groupData);
+      }).toList();
+
+      // Save updated groups
+      await prefs.setStringList('groups', updatedGroups);
+
+      // Add timestamp to help other pages detect settlement changes
+      await prefs.setInt(
+        'settlement_change_timestamp',
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (e) {
+      print("Error updating the group as settled, $e");
+    }
   }
 }

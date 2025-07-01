@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:splitwiser/splitwiser/add_new_group_page.dart';
+import 'add_new_group_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
+import 'dart:io';
+import '../../Dashboard/activity_service.dart';
 
 class CreateExpenseForm extends StatefulWidget {
   final List<String> groups;
@@ -26,56 +29,34 @@ class CreateExpenseForm extends StatefulWidget {
 class _CreateExpenseFormState extends State<CreateExpenseForm> {
   final List<Map<String, dynamic>> icons = [
     {'icon': Icons.fastfood, 'label': 'Food'},
-    {'icon': Icons.local_gas_station, 'label': 'Fuel'},
-    {'icon': Icons.cake, 'label': 'Gift'},
+    {'icon': Icons.directions_car, 'label': 'Transport'},
+    {'icon': Icons.cake, 'label': 'Birthday'},
     {'icon': Icons.shopping_cart, 'label': 'Shopping'},
     {'icon': Icons.home, 'label': 'Home'},
-    {'icon': Icons.sports_bar, 'label': 'Bar'},
+    {'icon': Icons.sports_bar, 'label': 'Drinking'},
     {'icon': Icons.flight, 'label': 'Travel'},
     {'icon': Icons.movie, 'label': 'Movie'},
   ];
   int selectedIconIndex = 0;
 
   final List<Map<String, String>> currencies = [
-    {'code': 'AED', 'name': 'UAE Dirham', 'country': 'United Arab Emirates'},
-    {'code': 'ARS', 'name': 'Argentine Peso', 'country': 'Argentina'},
+    {'code': 'MYR', 'name': 'Malaysian Ringgit', 'country': 'Malaysia'},
     {'code': 'AUD', 'name': 'Australian Dollar', 'country': 'Australia'},
-    {'code': 'BRL', 'name': 'Brazilian Real', 'country': 'Brazil'},
     {'code': 'CAD', 'name': 'Canadian Dollar', 'country': 'Canada'},
-    {'code': 'CHF', 'name': 'Swiss Franc', 'country': 'Switzerland'},
-    {'code': 'CLP', 'name': 'Chilean Peso', 'country': 'Chile'},
     {'code': 'CNY', 'name': 'Chinese Yuan', 'country': 'China'},
-    {'code': 'COP', 'name': 'Colombian Peso', 'country': 'Colombia'},
-    {'code': 'CZK', 'name': 'Czech Koruna', 'country': 'Czech Republic'},
-    {'code': 'DKK', 'name': 'Danish Krone', 'country': 'Denmark'},
-    {'code': 'EGP', 'name': 'Egyptian Pound', 'country': 'Egypt'},
     {'code': 'EUR', 'name': 'Euro', 'country': 'European Union'},
     {'code': 'GBP', 'name': 'British Pound', 'country': 'United Kingdom'},
     {'code': 'HKD', 'name': 'Hong Kong Dollar', 'country': 'Hong Kong'},
-    {'code': 'HUF', 'name': 'Hungarian Forint', 'country': 'Hungary'},
     {'code': 'IDR', 'name': 'Indonesian Rupiah', 'country': 'Indonesia'},
-    {'code': 'ILS', 'name': 'Israeli New Shekel', 'country': 'Israel'},
-    {'code': 'INR', 'name': 'Indian Rupee', 'country': 'India'},
     {'code': 'JPY', 'name': 'Japanese Yen', 'country': 'Japan'},
     {'code': 'KRW', 'name': 'South Korean Won', 'country': 'South Korea'},
-    {'code': 'MXN', 'name': 'Mexican Peso', 'country': 'Mexico'},
-    {'code': 'MYR', 'name': 'Malaysian Ringgit', 'country': 'Malaysia'},
-    {'code': 'NOK', 'name': 'Norwegian Krone', 'country': 'Norway'},
     {'code': 'NZD', 'name': 'New Zealand Dollar', 'country': 'New Zealand'},
     {'code': 'PHP', 'name': 'Philippine Peso', 'country': 'Philippines'},
-    {'code': 'PKR', 'name': 'Pakistani Rupee', 'country': 'Pakistan'},
-    {'code': 'PLN', 'name': 'Polish Złoty', 'country': 'Poland'},
-    {'code': 'RUB', 'name': 'Russian Ruble', 'country': 'Russia'},
-    {'code': 'SAR', 'name': 'Saudi Riyal', 'country': 'Saudi Arabia'},
-    {'code': 'SEK', 'name': 'Swedish Krona', 'country': 'Sweden'},
     {'code': 'SGD', 'name': 'Singapore Dollar', 'country': 'Singapore'},
     {'code': 'THB', 'name': 'Thai Baht', 'country': 'Thailand'},
-    {'code': 'TRY', 'name': 'Turkish Lira', 'country': 'Turkey'},
     {'code': 'TWD', 'name': 'Taiwan Dollar', 'country': 'Taiwan'},
-    {'code': 'UAH', 'name': 'Ukrainian Hryvnia', 'country': 'Ukraine'},
     {'code': 'USD', 'name': 'US Dollar', 'country': 'United States'},
     {'code': 'VND', 'name': 'Vietnamese Dong', 'country': 'Vietnam'},
-    {'code': 'ZAR', 'name': 'South African Rand', 'country': 'South Africa'},
   ];
   String selectedCurrency = 'MYR';
 
@@ -88,14 +69,21 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
   late TextEditingController _dateController;
   late TextEditingController _currencyController;
   late TextEditingController _splitMethodController;
-  late TextEditingController _groupController;
+
+  late TextEditingController _serviceChargeController;
+  late TextEditingController _serviceTaxController;
   String? selectedSplitMethod;
+  double serviceTaxPercentage = 0.0;
+  double serviceChargePercentage = 0.0;
+
+  List<String> attachedReceiptPaths = [];
+  final ImagePicker _picker = ImagePicker();
+  static const int maxAttachments = 5;
 
   List<Map<String, dynamic>> groupMembers = [];
   String? selectedSinglePayer;
   Map<String, double> multiplePayers = {};
 
-  // Store split data for editing
   Map<String, double> editingSplitAmounts = {};
   Set<String> editingSelectedMembers = {};
   Map<String, double> editingPercentages = {};
@@ -143,7 +131,6 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
               .toList();
         });
 
-        // Update paid by controller after loading members (especially important for editing mode)
         if (widget.editingExpense != null && paidByType != null) {
           _updatePaidByController();
         }
@@ -166,17 +153,16 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
               (m) => m['email'] == entry.key,
               orElse: () => {'name': 'Unknown'},
             );
-            return member['name']; // Return only member name, not including amount
+            return member['name'];
           })
           .join(', ');
-      _paidByController.text = payerNames; // 直接显示成员名字，不加 "Multiple"
+      _paidByController.text = payerNames;
     }
   }
 
   bool _isValidAmount(String text) {
     if (text.isEmpty) return false;
 
-    // Check for leading zeros (except for "0" itself and "0.xx" format)
     if (text.length > 1 && text.startsWith('0') && !text.startsWith('0.')) {
       return false;
     }
@@ -195,6 +181,8 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         _dateController.text.isNotEmpty;
   }
 
+
+
   @override
   void initState() {
     super.initState();
@@ -204,25 +192,23 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
     _splitMethodController = TextEditingController(
       text: selectedSplitMethod ?? '',
     );
-    _groupController = TextEditingController(text: selectedGroup ?? '');
 
-    // Check if we're editing an existing expense
+    _serviceTaxController = TextEditingController();
+    _serviceChargeController = TextEditingController();
+
     if (widget.editingExpense != null) {
       _populateFieldsForEditing();
-      // Load group members for editing mode
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _loadGroupMembers();
       });
     } else {
-      // Set default date to today for new expenses
       final now = DateTime.now();
-      final formattedDate = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final formattedDate =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
       _dateController.text = formattedDate;
 
-      // Set pre-selected group if provided
       if (widget.preSelectedGroup != null) {
         selectedGroup = widget.preSelectedGroup;
-        // Load group members for the pre-selected group
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _loadGroupMembers();
         });
@@ -233,21 +219,21 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
   void _populateFieldsForEditing() {
     final expense = widget.editingExpense!;
 
-    // Populate basic fields
+    // Fill basic fields
     descController.text = expense['name'] ?? '';
     totalController.text = expense['amount']?.toString() ?? '';
     _dateController.text = expense['date'] ?? '';
 
-    // Set group (should be non-editable)
+    // Set group non-editable
     selectedGroup = widget.preSelectedGroup;
 
-    // Set currency if available
+    // Set currency
     if (expense['currency'] != null) {
       selectedCurrency = expense['currency'];
       _currencyController.text = selectedCurrency;
     }
 
-    // Set icon if available
+    // Set icon
     if (expense['avatar'] != null) {
       final avatarCodePoint = expense['avatar'] as int;
       // Find the matching icon index
@@ -270,7 +256,6 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         final payers = paidBy['payers'] as Map<String, dynamic>;
         multiplePayers = Map<String, double>.from(payers);
       }
-      // Don't call _updatePaidByController() here - will be called after group members are loaded
     }
 
     // Handle split information
@@ -294,21 +279,47 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
             selectedSplitMethod = 'Evenly';
           } else if (method == 'custom') {
             selectedSplitMethod = 'Custom Amount';
-            editingSplitAmounts[email] = (splitItem['amount'] as double? ?? 0.0);
+            editingSplitAmounts[email] =
+                (splitItem['amount'] as double? ?? 0.0);
           } else if (method == 'percentage') {
             selectedSplitMethod = 'Percentage';
-            editingPercentages[email] = (splitItem['percentage'] as double? ?? 0.0);
+            editingPercentages[email] =
+                (splitItem['percentage'] as double? ?? 0.0);
           } else if (method == 'shares') {
             selectedSplitMethod = 'Shares';
             editingShares[email] = (splitItem['shares'] as int? ?? 1);
           }
         }
 
-        // Also store the actual split data for immediate use
+        // Store the actual split data for immediate use
         actualSplitData = List<Map<String, dynamic>>.from(split);
 
         _splitMethodController.text = selectedSplitMethod ?? '';
       }
+    }
+
+    // Load receipt attachments if available
+    if (expense.containsKey('receiptPaths')) {
+      final receiptPaths = expense['receiptPaths'] as List<dynamic>?;
+      if (receiptPaths != null) {
+        attachedReceiptPaths = List<String>.from(receiptPaths);
+      }
+    }
+
+    // Load tax and service charge percentages if available
+    if (expense.containsKey('serviceTaxPercentage')) {
+      serviceTaxPercentage =
+          (expense['serviceTaxPercentage'] as double?) ?? 0.0;
+      _serviceTaxController.text = serviceTaxPercentage > 0
+          ? serviceTaxPercentage.toString()
+          : '';
+    }
+    if (expense.containsKey('serviceChargePercentage')) {
+      serviceChargePercentage =
+          (expense['serviceChargePercentage'] as double?) ?? 0.0;
+      _serviceChargeController.text = serviceChargePercentage > 0
+          ? serviceChargePercentage.toString()
+          : '';
     }
   }
 
@@ -341,7 +352,7 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
       appBar: AppBar(
         title: Text(
           widget.editingExpense != null ? 'Edit Expense' : 'Create Expense',
-          style: TextStyle(color: Colors.white70)
+          style: TextStyle(color: Colors.white70),
         ),
         backgroundColor: Color.fromARGB(255, 39, 39, 40),
         iconTheme: IconThemeData(color: Colors.white70),
@@ -349,7 +360,6 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
       backgroundColor: Color.fromARGB(255, 39, 39, 40),
       body: GestureDetector(
         onTap: () {
-          // Dismiss keyboard when tapping outside
           FocusScope.of(context).unfocus();
         },
         child: Stack(
@@ -366,11 +376,9 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Description + Icon
                     SizedBox(height: 15),
                     Row(
                       children: [
-                        // Description input
                         Expanded(
                           child: TextField(
                             controller: descController,
@@ -420,7 +428,6 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                           ),
                         ),
                         SizedBox(width: 12),
-                        // Icon picker
                         Container(
                           height: 52,
                           width: 52,
@@ -450,10 +457,8 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                     ),
                     SizedBox(height: 24),
 
-                    // Total + Currency
                     Row(
                       children: [
-                        // Total input
                         Expanded(
                           child: TextField(
                             controller: totalController,
@@ -492,17 +497,21 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(20),
                                 borderSide: BorderSide(
-                                  color: (totalController.text.isNotEmpty && !_isValidAmount(totalController.text))
-                                    ? Colors.red
-                                    : Colors.grey,
+                                  color:
+                                      (totalController.text.isNotEmpty &&
+                                          !_isValidAmount(totalController.text))
+                                      ? Colors.red
+                                      : Colors.grey,
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(20),
                                 borderSide: BorderSide(
-                                  color: (totalController.text.isNotEmpty && !_isValidAmount(totalController.text))
-                                    ? Colors.red
-                                    : Colors.deepPurple,
+                                  color:
+                                      (totalController.text.isNotEmpty &&
+                                          !_isValidAmount(totalController.text))
+                                      ? Colors.red
+                                      : Colors.deepPurple,
                                   width: 2,
                                 ),
                               ),
@@ -517,7 +526,6 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                           ),
                         ),
                         SizedBox(width: 10),
-                        // Currency picker
                         SizedBox(
                           width: 100,
                           child: TextField(
@@ -573,6 +581,7 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                                       CurrencySelector(
                                         currencies: currencies,
                                         scrollController: scrollController,
+                                        selectedCurrency: selectedCurrency,
                                         onSelect: (code) {
                                           setState(() {
                                             selectedCurrency = code;
@@ -596,19 +605,17 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                       ],
                     ),
                     // Error message for invalid total amount
-                    if (totalController.text.isNotEmpty && !_isValidAmount(totalController.text))
+                    if (totalController.text.isNotEmpty &&
+                        !_isValidAmount(totalController.text))
                       Padding(
                         padding: const EdgeInsets.only(top: 8.0, left: 4.0),
                         child: Text(
                           totalController.text.length > 1 &&
-                          totalController.text.startsWith('0') &&
-                          !totalController.text.startsWith('0.')
-                            ? 'Leading zeros are not allowed'
-                            : 'Amount must be greater than 0',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontSize: 12,
-                          ),
+                                  totalController.text.startsWith('0') &&
+                                  !totalController.text.startsWith('0.')
+                              ? 'Leading zeros are not allowed'
+                              : 'Amount must be greater than 0',
+                          style: TextStyle(color: Colors.red, fontSize: 12),
                         ),
                       ),
                     SizedBox(height: 24),
@@ -616,7 +623,9 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                     // Group
                     TextField(
                       readOnly: true,
-                      enabled: widget.editingExpense == null && widget.preSelectedGroup == null, // Disable when editing OR when group is pre-selected
+                      enabled:
+                          widget.editingExpense == null &&
+                          widget.preSelectedGroup == null,
                       controller: TextEditingController(
                         text: selectedGroup ?? '',
                       ),
@@ -627,9 +636,11 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                             Text(
                               'Group',
                               style: TextStyle(
-                                color: (widget.editingExpense != null || widget.preSelectedGroup != null)
-                                  ? Colors.grey
-                                  : Colors.white
+                                color:
+                                    (widget.editingExpense != null ||
+                                        widget.preSelectedGroup != null)
+                                    ? Colors.grey
+                                    : Colors.white,
                               ),
                             ),
                             Text(
@@ -646,9 +657,11 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(20),
                           borderSide: BorderSide(
-                            color: (widget.editingExpense != null || widget.preSelectedGroup != null)
-                              ? Colors.grey.shade600
-                              : Colors.grey
+                            color:
+                                (widget.editingExpense != null ||
+                                    widget.preSelectedGroup != null)
+                                ? Colors.grey.shade600
+                                : Colors.grey,
                           ),
                         ),
                         enabledBorder: OutlineInputBorder(
@@ -672,38 +685,42 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                           horizontal: 20,
                         ),
                       ),
-                      onTap: widget.editingExpense != null ? null : () {
-                        showModalBottomSheet(
-                          context: context,
-                          isScrollControlled: true,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          builder: (context) => DraggableScrollableSheet(
-                            initialChildSize: 0.9,
-                            minChildSize: 0.4,
-                            maxChildSize: 0.9,
-                            expand: false,
-                            builder: (context, scrollController) =>
-                                GroupSelector(
-                                  groups: widget.groups,
-                                  scrollController: scrollController,
-                                  initialSelectedGroup: selectedGroup,
-                                  onSelect: (g) async {
-                                    setState(() {
-                                      selectedGroup = g;
-                                    });
-                                    await _loadGroupMembers();
-                                  },
+                      onTap: widget.editingExpense != null
+                          ? null
+                          : () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
                                 ),
-                          ),
-                        );
-                      },
+                                builder: (context) => DraggableScrollableSheet(
+                                  initialChildSize: 0.9,
+                                  minChildSize: 0.4,
+                                  maxChildSize: 0.9,
+                                  expand: false,
+                                  builder: (context, scrollController) =>
+                                      GroupSelector(
+                                        groups: widget.groups,
+                                        scrollController: scrollController,
+                                        initialSelectedGroup: selectedGroup,
+                                        onSelect: (g) async {
+                                          setState(() {
+                                            selectedGroup = g;
+                                          });
+                                          await _loadGroupMembers();
+                                        },
+                                      ),
+                                ),
+                              );
+                            },
                       style: TextStyle(
                         fontSize: 16,
-                        color: (widget.editingExpense != null || widget.preSelectedGroup != null)
-                          ? Colors.grey
-                          : Colors.white
+                        color:
+                            (widget.editingExpense != null ||
+                                widget.preSelectedGroup != null)
+                            ? Colors.grey
+                            : Colors.white,
                       ),
                     ),
 
@@ -763,16 +780,15 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                         }
 
                         if (!_isValidAmount(totalController.text)) {
-                          String errorMessage = 'Please enter a valid amount greater than 0.';
+                          String errorMessage =
+                              'Please enter a valid amount greater than 0.';
                           if (totalController.text.length > 1 &&
                               totalController.text.startsWith('0') &&
                               !totalController.text.startsWith('0.')) {
-                            errorMessage = 'Leading zeros are not allowed. Please enter a valid amount.';
+                            errorMessage =
+                                'Leading zeros are not allowed. Please enter a valid amount.';
                           }
-                          _showAlertDialog(
-                            'Invalid Amount',
-                            errorMessage,
-                          );
+                          _showAlertDialog('Invalid Amount', errorMessage);
                           return;
                         }
 
@@ -802,6 +818,9 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                                       double.tryParse(totalController.text) ??
                                       0.0,
                                   currency: selectedCurrency,
+                                  currentPaidByType: paidByType,
+                                  currentSinglePayer: selectedSinglePayer,
+                                  currentMultiplePayers: multiplePayers,
                                   onConfirm:
                                       (type, singlePayer, multiplePayers) {
                                         setState(() {
@@ -876,16 +895,15 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                         }
 
                         if (!_isValidAmount(totalController.text)) {
-                          String errorMessage = 'Please enter a valid amount greater than 0.';
+                          String errorMessage =
+                              'Please enter a valid amount greater than 0.';
                           if (totalController.text.length > 1 &&
                               totalController.text.startsWith('0') &&
                               !totalController.text.startsWith('0.')) {
-                            errorMessage = 'Leading zeros are not allowed. Please enter a valid amount.';
+                            errorMessage =
+                                'Leading zeros are not allowed. Please enter a valid amount.';
                           }
-                          _showAlertDialog(
-                            'Invalid Amount',
-                            errorMessage,
-                          );
+                          _showAlertDialog('Invalid Amount', errorMessage);
                           return;
                         }
 
@@ -909,14 +927,15 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                             expand: false,
                             builder: (context, scrollController) =>
                                 SplitMethodSelector(
-                                  onSelect: (method, selectedContext, splitData) {
-                                    setState(() {
-                                      selectedSplitMethod = method;
-                                      _splitMethodController.text = method;
-                                      actualSplitData = splitData; // Store the actual split data
-                                    });
-                                    Navigator.pop(selectedContext);
-                                  },
+                                  onSelect:
+                                      (method, selectedContext, splitData) {
+                                        setState(() {
+                                          selectedSplitMethod = method;
+                                          _splitMethodController.text = method;
+                                          actualSplitData = splitData;
+                                        });
+                                        Navigator.pop(selectedContext);
+                                      },
                                   scrollController: scrollController,
                                   initialSelectedMethod: selectedSplitMethod,
                                   groupMembers: groupMembers,
@@ -924,11 +943,44 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                                       double.tryParse(totalController.text) ??
                                       0.0,
                                   currency: selectedCurrency,
-                                  // Pass editing data
-                                  editingSplitAmounts: widget.editingExpense != null ? editingSplitAmounts : null,
-                                  editingSelectedMembers: widget.editingExpense != null ? editingSelectedMembers : null,
-                                  editingPercentages: widget.editingExpense != null ? editingPercentages : null,
-                                  editingShares: widget.editingExpense != null ? editingShares : null,
+                                  // Pass current data to preserve user input
+                                  editingSplitAmounts: editingSplitAmounts.isNotEmpty
+                                      ? editingSplitAmounts
+                                      : null,
+                                  editingSelectedMembers: editingSelectedMembers.isNotEmpty
+                                      ? editingSelectedMembers
+                                      : null,
+                                  editingPercentages: editingPercentages.isNotEmpty
+                                      ? editingPercentages
+                                      : null,
+                                  editingShares: editingShares.isNotEmpty
+                                      ? editingShares
+                                      : null,
+                                  serviceChargePercentage:
+                                      serviceChargePercentage,
+                                  serviceTaxPercentage: serviceTaxPercentage,
+                                  onTaxChargeChanged:
+                                      (serviceTax, serviceCharge) {
+                                        setState(() {
+                                          serviceTaxPercentage = serviceTax;
+                                          serviceChargePercentage =
+                                              serviceCharge;
+                                        });
+                                      },
+                                  onSaveCurrentData: (method, currentData) {
+                                    setState(() {
+                                      // Save current input data based on method
+                                      if (method == 'Custom Amount' && currentData.containsKey('amounts')) {
+                                        editingSplitAmounts = Map<String, double>.from(currentData['amounts']);
+                                      } else if (method == 'Evenly' && currentData.containsKey('selectedMembers')) {
+                                        editingSelectedMembers = Set<String>.from(currentData['selectedMembers']);
+                                      } else if (method == 'Percentage' && currentData.containsKey('percentages')) {
+                                        editingPercentages = Map<String, double>.from(currentData['percentages']);
+                                      } else if (method == 'Shares' && currentData.containsKey('shares')) {
+                                        editingShares = Map<String, int>.from(currentData['shares']);
+                                      }
+                                    });
+                                  },
                                 ),
                           ),
                         );
@@ -997,7 +1049,137 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                       style: TextStyle(fontSize: 16, color: Colors.white),
                     ),
 
-                    SizedBox(height: 40),
+                    SizedBox(height: 20),
+
+                    // Divider
+                    Divider(
+                      color: Colors.grey.shade600,
+                      thickness: 1,
+                      height: 40,
+                    ),
+
+                    // Receipt attachment
+                    Row(
+                      children: [
+                        SizedBox(width: 8),
+                        Icon(
+                          Icons.receipt_long,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          attachedReceiptPaths.isNotEmpty
+                              ? 'Attachments: ${attachedReceiptPaths.length} file${attachedReceiptPaths.length > 1 ? 's' : ''}'
+                              : 'Attachments (Optional - Up to 5 Images)',
+                          style: TextStyle(
+                            color: attachedReceiptPaths.isNotEmpty
+                                ? Colors.green
+                                : Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Show receipt attachment slots
+                    SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: List.generate(
+                          attachedReceiptPaths.length < maxAttachments
+                              ? attachedReceiptPaths.length + 1
+                              : maxAttachments,
+                          (index) {
+                            bool hasImage = index < attachedReceiptPaths.length;
+                            return GestureDetector(
+                              onTap: () {
+                                if (hasImage) {
+                                  // View or remove
+                                  _showReceiptOptions(index);
+                                } else {
+                                  // Add new receipt
+                                  _attachReceipt();
+                                }
+                              },
+                              child: Container(
+                                width: 60,
+                                height: 60,
+                                decoration: BoxDecoration(
+                                  color: hasImage
+                                      ? Color.fromARGB(30, 76, 175, 80)
+                                      : Color.fromARGB(30, 92, 56, 200),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: hasImage
+                                        ? Colors.green.withValues(alpha: 0.5)
+                                        : Colors.grey.withValues(alpha: 0.3),
+                                    width: 1.5,
+                                    style: BorderStyle.solid,
+                                  ),
+                                ),
+                                child: hasImage
+                                    ? Stack(
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            child: Image.file(
+                                              File(attachedReceiptPaths[index]),
+                                              width: 60,
+                                              height: 60,
+                                              fit: BoxFit.cover,
+                                              errorBuilder:
+                                                  (context, error, stackTrace) {
+                                                    return Container(
+                                                      width: 60,
+                                                      height: 60,
+                                                      color: Colors.grey[300],
+                                                      child: Icon(
+                                                        Icons.broken_image,
+                                                        color: Colors.grey[600],
+                                                        size: 24,
+                                                      ),
+                                                    );
+                                                  },
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 2,
+                                            right: 2,
+                                            child: Container(
+                                              width: 16,
+                                              height: 16,
+                                              decoration: BoxDecoration(
+                                                color: Colors.green,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Icon(
+                                                Icons.check,
+                                                color: Colors.white,
+                                                size: 10,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Icon(
+                                        Icons.add,
+                                        color: Colors.grey,
+                                        size: 24,
+                                      ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+                    SizedBox(height: 24),
 
                     // Create button
                     SizedBox(
@@ -1006,10 +1188,8 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
                         onPressed: _isFormValid()
                             ? () async {
                                 if (widget.editingExpense != null) {
-                                  // Update existing expense
                                   await _updateExpense();
                                 } else {
-                                  // Create new expense
                                   await _createExpense();
                                 }
                               }
@@ -1065,6 +1245,11 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
           'avatar': icons[selectedIconIndex]['icon'].codePoint,
           'paidBy': _getPaidByData(),
           'split': _getSplitData(),
+          'receiptPaths': attachedReceiptPaths, // Save receipt attachments
+          'serviceTaxPercentage':
+              serviceTaxPercentage, // Save service tax percentage
+          'serviceChargePercentage':
+              serviceChargePercentage, // Save service charge percentage
         };
 
         // Add expense to group expenses list
@@ -1074,7 +1259,12 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         (groupData['expenses'] as List).add(expenseData);
 
         // Update group total
-        groupData['total'] = (groupData['total'] ?? 0.0) + double.parse(totalController.text);
+        groupData['total'] =
+            (groupData['total'] ?? 0.0) + double.parse(totalController.text);
+
+        // Clear settlement status when adding a new expense
+        groupData.remove('isSettled');
+        groupData.remove('settledDate');
 
         // Calculate and update settlement details
         _updateGroupSettlement(groupData);
@@ -1087,10 +1277,20 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
 
     await prefs.setStringList('groups', savedGroups);
 
+    // Log activity for expense creation
+    if (selectedGroup != null) {
+      await ActivityService.addExpenseCreated(
+        expenseName: descController.text,
+        amount: double.parse(totalController.text),
+        groupName: selectedGroup!,
+        currency: selectedCurrency,
+      );
+    }
+
     // Call the callback if provided
     widget.onExpenseCreated?.call();
 
-    // Navigate back appropriately
+    
     if (mounted) {
       if (widget.preSelectedGroup != null) {
         // If we came from group detail page, just go back to it
@@ -1118,12 +1318,14 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
           // Match by multiple fields to ensure we get the exact expense
           bool nameMatch = expense['name'] == originalExpense['name'];
           bool dateMatch = expense['date'] == originalExpense['date'];
-          bool amountMatch = (expense['amount'] as double).toStringAsFixed(2) ==
-                           (originalExpense['amount'] as double).toStringAsFixed(2);
+          bool amountMatch =
+              (expense['amount'] as double).toStringAsFixed(2) ==
+              (originalExpense['amount'] as double).toStringAsFixed(2);
 
           // Also check avatar if available
           bool avatarMatch = true;
-          if (expense.containsKey('avatar') && originalExpense.containsKey('avatar')) {
+          if (expense.containsKey('avatar') &&
+              originalExpense.containsKey('avatar')) {
             avatarMatch = expense['avatar'] == originalExpense['avatar'];
           }
 
@@ -1136,10 +1338,17 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
             'name': descController.text,
             'amount': double.parse(totalController.text),
             'currency': selectedCurrency,
-            'date': selectedDate.toString().split(' ')[0], // Use consistent date format
+            'date': selectedDate.toString().split(
+              ' ',
+            )[0], // Use consistent date format
             'avatar': icons[selectedIconIndex]['icon'].codePoint,
             'paidBy': _getPaidByData(),
             'split': _getSplitData(),
+            'receiptPaths': attachedReceiptPaths, // Save receipt attachments
+            'serviceTaxPercentage':
+                serviceTaxPercentage, // Save service tax percentage
+            'serviceChargePercentage':
+                serviceChargePercentage, // Save service charge percentage
           };
 
           // Replace the old expense with updated data
@@ -1152,6 +1361,12 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
           savedGroups[i] = json.encode(groupData);
 
           await prefs.setStringList('groups', savedGroups);
+
+          // Log activity for expense update
+          await ActivityService.addExpenseUpdated(
+            expenseName: descController.text,
+            groupName: selectedGroup!,
+          );
 
           // Call the callback if provided
           widget.onExpenseCreated?.call();
@@ -1175,6 +1390,10 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
       total += (expense['amount'] as double? ?? 0.0);
     }
     groupData['total'] = total;
+
+    // Clear settlement status since we're modifying expenses
+    groupData.remove('isSettled');
+    groupData.remove('settledDate');
 
     // Recalculate settlement details
     _updateGroupSettlement(groupData);
@@ -1217,13 +1436,222 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
     };
   }
 
+  // Attach receipt functionality
+  Future<void> _attachReceipt() async {
+    if (attachedReceiptPaths.length >= maxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Maximum $maxAttachments attachments allowed'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Attach Receipt (${attachedReceiptPaths.length}/$maxAttachments)',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final XFile? image = await _picker.pickImage(
+                        source: ImageSource.camera,
+                        maxWidth: 1024,
+                        maxHeight: 1024,
+                        imageQuality: 85,
+                      );
+                      if (image != null) {
+                        setState(() {
+                          attachedReceiptPaths.add(image.path);
+                        });
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Color.fromARGB(164, 92, 56, 200),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.camera_alt,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text('Camera'),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(context);
+                      // Check if we can add more images
+                      if (attachedReceiptPaths.length >= maxAttachments) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Maximum $maxAttachments images allowed',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      final XFile? image = await _picker.pickImage(
+                        source: ImageSource.gallery,
+                        maxWidth: 1024,
+                        maxHeight: 1024,
+                        imageQuality: 85,
+                      );
+
+                      if (image != null) {
+                        setState(() {
+                          attachedReceiptPaths.add(image.path);
+                        });
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Color.fromARGB(164, 92, 56, 200),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.photo_library,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text('Gallery'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Show options for existing receipt
+  Future<void> _showReceiptOptions(int index) async {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Receipt ${index + 1}',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      setState(() {
+                        attachedReceiptPaths.removeAt(index);
+                      });
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.delete,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text('Remove'),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final XFile? image = await _picker.pickImage(
+                        source: ImageSource.gallery,
+                        maxWidth: 1024,
+                        maxHeight: 1024,
+                        imageQuality: 85,
+                      );
+
+                      if (image != null) {
+                        setState(() {
+                          // Replace current image
+                          attachedReceiptPaths[index] = image.path;
+                        });
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Color.fromARGB(164, 92, 56, 200),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.edit,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text('Change'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   List<Map<String, dynamic>> _getSplitData() {
     // If we have actual split data from the split method selector, use it
     if (actualSplitData != null && actualSplitData!.isNotEmpty) {
       return actualSplitData!;
     }
 
-    // Fallback to generating split data (for editing or when no split data is available)
     final splitData = <Map<String, dynamic>>[];
     final totalAmount = double.parse(totalController.text);
 
@@ -1238,9 +1666,9 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         });
       }
     } else if (selectedSplitMethod == 'Custom Amount') {
-      // Use stored custom amounts if editing, otherwise default to equal split
-      if (widget.editingExpense != null && editingSplitAmounts.isNotEmpty) {
-        // Use the stored custom amounts from editing
+      // Use stored custom amounts if available (either from editing or saved data)
+      if (editingSplitAmounts.isNotEmpty) {
+        // Use the stored custom amounts
         for (var member in groupMembers) {
           final memberEmail = member['email'];
           if (editingSelectedMembers.contains(memberEmail)) {
@@ -1253,7 +1681,6 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
           }
         }
       } else {
-        // Default behavior for new expenses
         for (var member in groupMembers) {
           splitData.add({
             'email': member['email'],
@@ -1264,8 +1691,8 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         }
       }
     } else if (selectedSplitMethod == 'Percentage') {
-      // Use stored percentages if editing, otherwise default to equal percentage
-      if (widget.editingExpense != null && editingPercentages.isNotEmpty) {
+      // Use stored percentages if available 
+      if (editingPercentages.isNotEmpty) {
         for (var member in groupMembers) {
           final memberEmail = member['email'];
           if (editingSelectedMembers.contains(memberEmail)) {
@@ -1291,9 +1718,12 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         }
       }
     } else if (selectedSplitMethod == 'Shares') {
-      // Use stored shares if editing, otherwise default to equal shares
-      if (widget.editingExpense != null && editingShares.isNotEmpty) {
-        final totalShares = editingShares.values.fold(0, (sum, shares) => sum + shares);
+      // Use stored shares if available (either from editing or saved data)
+      if (editingShares.isNotEmpty) {
+        final totalShares = editingShares.values.fold(
+          0,
+          (sum, shares) => sum + shares,
+        );
         for (var member in groupMembers) {
           final memberEmail = member['email'];
           if (editingSelectedMembers.contains(memberEmail)) {
@@ -1395,16 +1825,14 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
         }
 
         if (balance > 0) {
-          // This member has positive balance (they paid more than their share)
-          // So you owe them
+          // you owe them
           details.add({
             'name': 'You owe $memberName',
             'text': '',
             'amount': balance.abs(),
           });
         } else {
-          // This member has negative balance (they paid less than their share)
-          // So they owe you
+          // they owe you
           details.add({
             'name': '$memberName owes you',
             'text': '',
@@ -1416,8 +1844,12 @@ class _CreateExpenseFormState extends State<CreateExpenseForm> {
 
     groupData['details'] = details;
     groupData['status'] = {
-      'text': userBalance >= 0 ? 'You are owed' : 'You owe',
-      'color': userBalance >= 0 ? 0xFFE8F5E8 : 0xFFFFE0E0,
+      'text': userBalance == 0
+          ? 'No expenses yet'
+          : (userBalance > 0 ? 'You are owed' : 'You owe'),
+      'color': userBalance == 0
+          ? 0xFFE8F5E8
+          : (userBalance > 0 ? 0xFFE8F5E8 : 0xFFFFE0E0),
       'amount': userBalance.abs(),
     };
   }
@@ -1564,37 +1996,41 @@ class _GroupSelectorState extends State<GroupSelector> {
               },
             ),
           ),
-          SizedBox(height: 16), // Spacing before the button
+          SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: ElevatedButton(
               onPressed: () async {
-                final newGroup = await Navigator.push<Group>(
+                final created = await Navigator.push<bool>(
                   context,
                   MaterialPageRoute(
                     builder: (context) => const AddNewGroupPage(),
                   ),
                 );
 
-                if (newGroup != null) {
-                  // Convert to Map and add to groups
-                  final groupMap = await newGroup.toJson();
-                  // Get shared preferences
+                if (created == true) {
+                  // Reload groups from SharedPreferences to get the new group
                   final prefs = await SharedPreferences.getInstance();
                   final savedGroups = prefs.getStringList('groups') ?? [];
+                  final groupNames = savedGroups
+                      .map(
+                        (groupStr) =>
+                            json.decode(groupStr) as Map<String, dynamic>,
+                      )
+                      .map((groupData) => groupData['name'] as String)
+                      .toList();
 
-                  // Add new group
-                  savedGroups.add(json.encode(groupMap));
-                  await prefs.setStringList('groups', savedGroups);
-
-                  // Update the local groups list and select the new group
+                  // Update the local groups list
                   if (mounted) {
                     setState(() {
-                      widget.groups.add(newGroup.name);
+                      widget.groups.clear();
+                      widget.groups.addAll(groupNames);
                     });
 
-                    // Notify parent to select the new group
-                    widget.onSelect(newGroup.name);
+                    // Select the last created group (newest one)
+                    if (groupNames.isNotEmpty) {
+                      widget.onSelect(groupNames.last);
+                    }
                     Navigator.pop(context);
                   }
                 }
@@ -1619,11 +2055,13 @@ class CurrencySelector extends StatefulWidget {
   final List<Map<String, String>> currencies;
   final Function(String) onSelect;
   final ScrollController scrollController;
+  final String? selectedCurrency;
 
   const CurrencySelector({
     required this.currencies,
     required this.onSelect,
     required this.scrollController,
+    this.selectedCurrency,
     Key? key,
   }) : super(key: key);
 
@@ -1720,15 +2158,35 @@ class _CurrencySelectorState extends State<CurrencySelector> {
                     itemCount: filteredCurrencies.length,
                     itemBuilder: (context, index) {
                       final currency = filteredCurrencies[index];
+                      final isSelected =
+                          currency['code'] == widget.selectedCurrency;
                       return ListTile(
                         dense: true,
+                        leading: isSelected
+                            ? Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                                size: 20,
+                              )
+                            : null,
                         title: Text(
                           '${currency['code']} - ${currency['name']}',
-                          style: TextStyle(fontSize: 16, color: Colors.white),
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isSelected ? Colors.green : Colors.white,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
                         ),
                         subtitle: Text(
                           currency['country']!,
-                          style: TextStyle(fontSize: 13, color: Colors.white70),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isSelected
+                                ? Colors.green.shade300
+                                : Colors.white70,
+                          ),
                         ),
                         onTap: () => widget.onSelect(currency['code']!),
                       );
@@ -1742,7 +2200,12 @@ class _CurrencySelectorState extends State<CurrencySelector> {
 }
 
 class SplitMethodSelector extends StatefulWidget {
-  final Function(String method, BuildContext modalContext, List<Map<String, dynamic>> splitData) onSelect;
+  final Function(
+    String method,
+    BuildContext modalContext,
+    List<Map<String, dynamic>> splitData,
+  )
+  onSelect;
   final ScrollController scrollController;
   final String? initialSelectedMethod;
   final List<Map<String, dynamic>> groupMembers;
@@ -1752,6 +2215,10 @@ class SplitMethodSelector extends StatefulWidget {
   final Set<String>? editingSelectedMembers;
   final Map<String, double>? editingPercentages;
   final Map<String, int>? editingShares;
+  final double serviceChargePercentage;
+  final double serviceTaxPercentage;
+  final Function(double serviceTax, double serviceCharge)? onTaxChargeChanged;
+  final Function(String method, Map<String, dynamic> currentData)? onSaveCurrentData;
 
   const SplitMethodSelector({
     required this.onSelect,
@@ -1764,6 +2231,10 @@ class SplitMethodSelector extends StatefulWidget {
     this.editingSelectedMembers,
     this.editingPercentages,
     this.editingShares,
+    this.serviceChargePercentage = 0.0,
+    this.serviceTaxPercentage = 0.0,
+    this.onTaxChargeChanged,
+    this.onSaveCurrentData,
     Key? key,
   }) : super(key: key);
 
@@ -1780,52 +2251,171 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     'Shares',
   ];
 
-  // For Evenly - track selected members
+  // For Evenly
   Set<String> selectedMembers = {};
 
-  // For Unequally - track amounts
-  Map<String, double> memberAmounts = {};
+  // For Custom Amount
+  Map<String, double> memberAmounts = {}; // Final amounts (with tax/charge)
+  Map<String, double> memberOriginalAmounts =
+      {}; // Original amounts (without tax/charge)
   Map<String, TextEditingController> amountControllers = {};
 
-  // For Percentage - track percentages
+  // For Percentage
   Map<String, double> memberPercentages = {};
   Map<String, TextEditingController> percentageControllers = {};
 
-  // For Shares - track shares
+  // For Shares 
   Map<String, int> memberShares = {};
   Map<String, TextEditingController> shareControllers = {};
+
+  // Tax and service charge controllers
+  final TextEditingController serviceTaxController = TextEditingController();
+  final TextEditingController serviceChargeController = TextEditingController();
+
+  // Calculate e.g., "12+43+23"
+  double _calculateExpression(String expression) {
+    try {
+      // Remove spaces and validate characters
+      String cleanExpression = expression.replaceAll(' ', '');
+      if (!RegExp(r'^[\d+\-*/.()]+$').hasMatch(cleanExpression)) {
+        return 0.0;
+      }
+
+      // Simple calculator for basic operations
+      List<String> parts = cleanExpression.split(RegExp(r'([+\-*/])'));
+      List<String> operators = RegExp(
+        r'([+\-*/])',
+      ).allMatches(cleanExpression).map((match) => match.group(0)!).toList();
+
+      if (parts.isEmpty) return 0.0;
+
+      double result = double.tryParse(parts[0]) ?? 0.0;
+
+      for (int i = 0; i < operators.length && i + 1 < parts.length; i++) {
+        double nextValue = double.tryParse(parts[i + 1]) ?? 0.0;
+        switch (operators[i]) {
+          case '+':
+            result += nextValue;
+            break;
+          case '-':
+            result -= nextValue;
+            break;
+          case '*':
+            result *= nextValue;
+            break;
+          case '/':
+            if (nextValue != 0) result /= nextValue;
+            break;
+        }
+      }
+
+      return result;
+    } catch (e) {
+      return 0.0;
+    }
+  }
+
+  // Calculate amount with tax and service charge
+  double _calculateAmountWithTaxes(double baseAmount) {
+    double total = baseAmount;
+
+    // Use local controller values
+    double serviceChargePercentage =
+        double.tryParse(serviceChargeController.text) ?? 0.0;
+    double serviceTaxPercentage =
+        double.tryParse(serviceTaxController.text) ?? 0.0;
+
+    if (serviceChargePercentage > 0) {
+      total += (baseAmount * serviceChargePercentage / 100);
+    }
+    if (serviceTaxPercentage > 0) {
+      total += (baseAmount * serviceTaxPercentage / 100);
+    }
+    return total;
+  }
+
+  // Recalculate all custom amounts when tax/charge rates change
+  void _recalculateCustomAmounts() {
+    if (_selectedMethodInSelector != 'Custom Amount') return;
+
+    // Recalculate final amounts using stored original amounts
+    for (var entry in memberOriginalAmounts.entries) {
+      String memberEmail = entry.key;
+      double originalAmount = entry.value;
+
+      // Apply new tax and service charge rates to original amount
+      double finalAmount = _calculateAmountWithTaxes(originalAmount);
+      memberAmounts[memberEmail] = finalAmount;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _selectedMethodInSelector = widget.initialSelectedMethod;
 
-    // Initialize data based on editing state
-    if (widget.editingSelectedMembers != null && widget.editingSelectedMembers!.isNotEmpty) {
-      // Use editing data
-      selectedMembers = Set.from(widget.editingSelectedMembers!);
+    // Initialize tax and service charge controllers with current values
+    serviceTaxController.text = widget.serviceTaxPercentage > 0
+        ? widget.serviceTaxPercentage.toString()
+        : '';
+    serviceChargeController.text = widget.serviceChargePercentage > 0
+        ? widget.serviceChargePercentage.toString()
+        : '';
 
-      if (widget.editingSplitAmounts != null) {
-        memberAmounts = Map.from(widget.editingSplitAmounts!);
-        // Initialize controllers with existing amounts
-        for (var entry in memberAmounts.entries) {
-          amountControllers[entry.key] = TextEditingController(text: entry.value.toStringAsFixed(2));
+    // Initialize data based on editing state - check for any saved data
+    bool hasSavedData = (widget.editingSelectedMembers != null && widget.editingSelectedMembers!.isNotEmpty) ||
+                       (widget.editingSplitAmounts != null && widget.editingSplitAmounts!.isNotEmpty) ||
+                       (widget.editingPercentages != null && widget.editingPercentages!.isNotEmpty) ||
+                       (widget.editingShares != null && widget.editingShares!.isNotEmpty);
+
+    if (hasSavedData) {
+      // Use editing data
+      if (widget.editingSelectedMembers != null && widget.editingSelectedMembers!.isNotEmpty) {
+        selectedMembers = Set.from(widget.editingSelectedMembers!);
+      } else {
+        // If no selected members but we have other data, initialize with all members
+        for (var member in widget.groupMembers) {
+          selectedMembers.add(member['email']);
         }
       }
 
-      if (widget.editingPercentages != null) {
+      if (widget.editingSplitAmounts != null && widget.editingSplitAmounts!.isNotEmpty) {
+        // For editing: editingSplitAmounts contains original amounts (without tax/charge)
+        memberOriginalAmounts = Map.from(widget.editingSplitAmounts!);
+
+        // Calculate final amounts with current tax/charge rates
+        for (var entry in memberOriginalAmounts.entries) {
+          String memberEmail = entry.key;
+          double originalAmount = entry.value;
+          double finalAmount = _calculateAmountWithTaxes(originalAmount);
+          memberAmounts[memberEmail] = finalAmount;
+        }
+
+        // Initialize controllers with original amounts (what user sees in input)
+        for (var entry in memberOriginalAmounts.entries) {
+          amountControllers[entry.key] = TextEditingController(
+            text: entry.value.toStringAsFixed(2),
+          );
+        }
+      }
+
+      if (widget.editingPercentages != null && widget.editingPercentages!.isNotEmpty) {
         memberPercentages = Map.from(widget.editingPercentages!);
         // Initialize controllers with existing percentages
         for (var entry in memberPercentages.entries) {
-          percentageControllers[entry.key] = TextEditingController(text: entry.value.toStringAsFixed(2));
+          percentageControllers[entry.key] = TextEditingController(
+            text: entry.value.toStringAsFixed(2),
+          );
         }
       }
 
-      if (widget.editingShares != null) {
+      if (widget.editingShares != null && widget.editingShares!.isNotEmpty) {
         memberShares = Map.from(widget.editingShares!);
         // Initialize controllers with existing shares
         for (var entry in memberShares.entries) {
-          shareControllers[entry.key] = TextEditingController(text: entry.value.toString());
+          shareControllers[entry.key] = TextEditingController(
+            text: entry.value.toString(),
+          );
         }
       }
     } else {
@@ -1848,6 +2438,9 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     for (var controller in shareControllers.values) {
       controller.dispose();
     }
+    // Dispose tax and service charge controllers
+    serviceTaxController.dispose();
+    serviceChargeController.dispose();
     super.dispose();
   }
 
@@ -1893,12 +2486,16 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
       case 'Custom Amount':
         for (var member in widget.groupMembers) {
           final memberEmail = member['email'];
-          final amount = memberAmounts[memberEmail];
-          if (amount != null && amount > 0) {
+          final originalAmount = memberOriginalAmounts[memberEmail];
+          final finalAmount = memberAmounts[memberEmail];
+          if (originalAmount != null && originalAmount > 0) {
             splitData.add({
               'email': memberEmail,
               'name': member['name'],
-              'amount': amount,
+              'amount':
+                  originalAmount, // Save original amount (without tax/charge)
+              'finalAmount':
+                  finalAmount, // Save final amount (with tax/charge) for display
               'method': 'custom',
             });
           }
@@ -1931,7 +2528,9 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
               'email': memberEmail,
               'name': member['name'],
               'shares': shares,
-              'amount': totalSharesCount > 0 ? (shares / totalSharesCount) * widget.totalAmount : 0.0,
+              'amount': totalSharesCount > 0
+                  ? (shares / totalSharesCount) * widget.totalAmount
+                  : 0.0,
               'method': 'shares',
             });
           }
@@ -1948,6 +2547,14 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
       onTap: () {
         setState(() {
           _selectedMethodInSelector = method;
+
+          // When switching to Evenly, automatically select all members
+          if (method == 'Evenly') {
+            selectedMembers.clear();
+            for (var member in widget.groupMembers) {
+              selectedMembers.add(member['email']);
+            }
+          }
         });
       },
       child: Container(
@@ -1989,6 +2596,156 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
             ),
 
             if (isSelected) ...[
+              // Add tax and service charge inputs for Custom Amount method
+              if (method == 'Custom Amount') ...[
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Service Tax & Charge (%)',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: serviceTaxController,
+                              onChanged: (value) {
+                                setState(() {
+                                  // Update parent's serviceTaxPercentage
+                                  widget.onTaxChargeChanged?.call(
+                                    double.tryParse(value) ?? 0.0,
+                                    double.tryParse(
+                                          serviceChargeController.text,
+                                        ) ??
+                                        0.0,
+                                  );
+                                  // Recalculate all existing amounts with new tax rates
+                                  _recalculateCustomAmounts();
+                                });
+                              },
+                              keyboardType: TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d*\.?\d{0,2}'),
+                                ),
+                              ],
+                              decoration: InputDecoration(
+                                hintText: 'Tax',
+                                hintStyle: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.deepPurple,
+                                    width: 2,
+                                  ),
+                                ),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                isDense: true,
+                              ),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: serviceChargeController,
+                              onChanged: (value) {
+                                setState(() {
+                                  // Update parent's serviceChargePercentage
+                                  widget.onTaxChargeChanged?.call(
+                                    double.tryParse(
+                                          serviceTaxController.text,
+                                        ) ??
+                                        0.0,
+                                    double.tryParse(value) ?? 0.0,
+                                  );
+                                  // Recalculate all existing amounts with new tax rates
+                                  _recalculateCustomAmounts();
+                                });
+                              },
+                              keyboardType: TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d*\.?\d{0,2}'),
+                                ),
+                              ],
+                              decoration: InputDecoration(
+                                hintText: 'Charge',
+                                hintStyle: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(
+                                    color: Colors.deepPurple,
+                                    width: 2,
+                                  ),
+                                ),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                isDense: true,
+                              ),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                    ],
+                  ),
+                ),
+              ],
               ...widget.groupMembers.map((member) => _buildMemberItem(member)),
             ],
           ],
@@ -2085,15 +2842,27 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
             ),
           ),
           Expanded(
-            flex: 1,
+            flex: 2,
             child: TextField(
               controller: controller,
               keyboardType: TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                FilteringTextInputFormatter.allow(RegExp(r'[\d+\-*/.() ]')),
+                // Custom formatter to limit decimal places to 2
+                TextInputFormatter.withFunction((oldValue, newValue) {
+                  // Split by operators to check each number
+                  String text = newValue.text;
+                  RegExp numberPattern = RegExp(r'\d+\.\d{3,}');
+
+                  // If any number has more than 2 decimal places, reject the input
+                  if (numberPattern.hasMatch(text)) {
+                    return oldValue;
+                  }
+                  return newValue;
+                }),
               ],
               decoration: InputDecoration(
-                hintText: '0.00',
+                hintText: 'e.g. 8.99+6.50-1.59',
                 hintStyle: TextStyle(color: Colors.white70, fontSize: 14),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -2115,7 +2884,7 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
               onTap: () {
-                // 延迟滚动，等待键盘弹出
+                // Delay scroll, wait for keyboard to appear
                 Future.delayed(Duration(milliseconds: 300), () {
                   if (widget.scrollController.hasClients) {
                     widget.scrollController.animateTo(
@@ -2127,12 +2896,32 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                 });
               },
               onChanged: (value) {
-                final amount = double.tryParse(value) ?? 0.0;
                 setState(() {
-                  if (amount > 0) {
-                    memberAmounts[memberEmail] = amount;
-                  } else {
+                  if (value.isEmpty) {
                     memberAmounts.remove(memberEmail);
+                    memberOriginalAmounts.remove(memberEmail);
+                    return;
+                  }
+
+                  // Try to parse as mathematical expression first
+                  double calculatedAmount = _calculateExpression(value);
+                  if (calculatedAmount > 0) {
+                    // Store original amount and calculate final amount with taxes
+                    memberOriginalAmounts[memberEmail] = calculatedAmount;
+                    double finalAmount = _calculateAmountWithTaxes(
+                      calculatedAmount,
+                    );
+                    memberAmounts[memberEmail] = finalAmount;
+                  } else {
+                    final amount = double.tryParse(value) ?? 0.0;
+                    if (amount > 0) {
+                      memberOriginalAmounts[memberEmail] = amount;
+                      double finalAmount = _calculateAmountWithTaxes(amount);
+                      memberAmounts[memberEmail] = finalAmount;
+                    } else {
+                      memberAmounts.remove(memberEmail);
+                      memberOriginalAmounts.remove(memberEmail);
+                    }
                   }
                 });
               },
@@ -2206,7 +2995,7 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
               onTap: () {
-                // 延迟滚动，等待键盘弹出
+                // Delay scroll, wait for keyboard to appear
                 Future.delayed(Duration(milliseconds: 300), () {
                   if (widget.scrollController.hasClients) {
                     widget.scrollController.animateTo(
@@ -2300,7 +3089,7 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
               onTap: () {
-                // 延迟滚动，等待键盘弹出
+                // Delay scroll, wait for keyboard to appear
                 Future.delayed(Duration(milliseconds: 300), () {
                   if (widget.scrollController.hasClients) {
                     widget.scrollController.animateTo(
@@ -2336,20 +3125,40 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildSummaryItem('Per Person', evenlyAmountPerPerson),
-            _buildEvenlyPeopleItem('People', selectedMembers.length, hasSelectedMembers),
+            _buildEvenlyPeopleItem(
+              'People',
+              selectedMembers.length,
+              hasSelectedMembers,
+            ),
           ],
         );
       case 'Custom Amount':
         final remaining = widget.totalAmount - totalUnequally;
+
+        // Precise comparison to 2 decimal places
+        double roundedTotal = double.parse(
+          widget.totalAmount.toStringAsFixed(2),
+        );
+        double roundedDivided = double.parse(totalUnequally.toStringAsFixed(2));
+        bool isExactMatch = roundedTotal == roundedDivided;
+
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildSummaryItemWithColor('Total', widget.totalAmount, Colors.white70),
-            _buildSummaryItemWithColor('Divided', totalUnequally, Colors.white70),
+            _buildSummaryItemWithColor(
+              'Total',
+              widget.totalAmount,
+              Colors.white70,
+            ),
+            _buildSummaryItemWithColor(
+              'Divided',
+              totalUnequally,
+              Colors.white70,
+            ),
             _buildSummaryItemWithColor(
               'Remaining',
-              remaining,
-              remaining == 0.0 ? Color.fromARGB(163, 14, 188, 109) : Colors.red,
+              isExactMatch ? 0.0 : remaining,
+              isExactMatch ? Color.fromARGB(163, 14, 188, 109) : Colors.red,
             ),
           ],
         );
@@ -2358,8 +3167,18 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildSummaryItemWithColor('Total', 100.0, Colors.white70, isPercentage: true),
-            _buildSummaryItemWithColor('Divided', totalPercentage, Colors.white70, isPercentage: true),
+            _buildSummaryItemWithColor(
+              'Total',
+              100.0,
+              Colors.white70,
+              isPercentage: true,
+            ),
+            _buildSummaryItemWithColor(
+              'Divided',
+              totalPercentage,
+              Colors.white70,
+              isPercentage: true,
+            ),
             _buildSummaryItemWithColor(
               'Remaining',
               remaining,
@@ -2444,7 +3263,11 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     );
   }
 
-  Widget _buildEvenlyPeopleItem(String label, int count, bool hasSelectedMembers) {
+  Widget _buildEvenlyPeopleItem(
+    String label,
+    int count,
+    bool hasSelectedMembers,
+  ) {
     return Column(
       children: [
         Text(
@@ -2468,14 +3291,22 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
     );
   }
 
-
-
   bool _canConfirm() {
     switch (_selectedMethodInSelector) {
       case 'Evenly':
-        return selectedMembers.isNotEmpty;
+        return selectedMembers.isNotEmpty; // At least 1 member must be selected
       case 'Custom Amount':
-        return memberAmounts.isNotEmpty && totalUnequally == widget.totalAmount;
+        // For Custom Amount, check if divided equals total (to 2 decimal places)
+        double totalDivided = memberAmounts.values.fold(
+          0.0,
+          (sum, amount) => sum + amount,
+        );
+        double roundedTotal = double.parse(
+          widget.totalAmount.toStringAsFixed(2),
+        );
+        double roundedDivided = double.parse(totalDivided.toStringAsFixed(2));
+        return memberOriginalAmounts.isNotEmpty &&
+            roundedTotal == roundedDivided;
       case 'Percentage':
         return memberPercentages.isNotEmpty && totalPercentage == 100.0;
       case 'Shares':
@@ -2525,7 +3356,9 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                 child: SingleChildScrollView(
                   controller: widget.scrollController,
                   padding: EdgeInsets.only(
-                    bottom: isKeyboardVisible ? 300 : 20, // 为浮动总结和键盘留出空间
+                    bottom: isKeyboardVisible
+                        ? 300
+                        : 20, // Leave space for floating summary and keyboard
                   ),
                   child: Column(
                     children: [
@@ -2556,8 +3389,27 @@ class _SplitMethodSelectorState extends State<SplitMethodSelector> {
                 child: ElevatedButton(
                   onPressed: _canConfirm()
                       ? () {
+                          // Save current input data before confirming
+                          final currentData = <String, dynamic>{};
+                          if (_selectedMethodInSelector == 'Custom Amount') {
+                            currentData['amounts'] = Map<String, double>.from(memberOriginalAmounts);
+                          } else if (_selectedMethodInSelector == 'Evenly') {
+                            currentData['selectedMembers'] = Set<String>.from(selectedMembers);
+                          } else if (_selectedMethodInSelector == 'Percentage') {
+                            currentData['percentages'] = Map<String, double>.from(memberPercentages);
+                          } else if (_selectedMethodInSelector == 'Shares') {
+                            currentData['shares'] = Map<String, int>.from(memberShares);
+                          }
+
+                          // Call the save callback
+                          widget.onSaveCurrentData?.call(_selectedMethodInSelector!, currentData);
+
                           final splitData = _generateSplitData();
-                          widget.onSelect(_selectedMethodInSelector!, context, splitData);
+                          widget.onSelect(
+                            _selectedMethodInSelector!,
+                            context,
+                            splitData,
+                          );
                         }
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -2642,6 +3494,9 @@ class PaidBySelector extends StatefulWidget {
   onConfirm;
   final double totalAmount;
   final String currency;
+  final String? currentPaidByType;
+  final String? currentSinglePayer;
+  final Map<String, double>? currentMultiplePayers;
 
   const PaidBySelector({
     Key? key,
@@ -2650,6 +3505,9 @@ class PaidBySelector extends StatefulWidget {
     required this.onConfirm,
     required this.totalAmount,
     required this.currency,
+    this.currentPaidByType,
+    this.currentSinglePayer,
+    this.currentMultiplePayers,
   }) : super(key: key);
 
   @override
@@ -2657,20 +3515,40 @@ class PaidBySelector extends StatefulWidget {
 }
 
 class _PaidBySelectorState extends State<PaidBySelector> {
-  String? paidByType = 'Single'; // 默认选择 Single
+  String? paidByType = 'Single';
   String? selectedSinglePayer;
   Map<String, double> multiplePayers = {};
   Map<String, TextEditingController> controllers = {};
 
+  @override
+  void initState() {
+    super.initState();
+    paidByType = widget.currentPaidByType ?? 'Single';
+    selectedSinglePayer = widget.currentSinglePayer;
+    multiplePayers = Map<String, double>.from(widget.currentMultiplePayers ?? {});
+
+    // Initialize controllers for all members
+    for (var member in widget.groupMembers) {
+      final email = member['email'] as String;
+      controllers[email] = TextEditingController();
+      if (multiplePayers.containsKey(email) && multiplePayers[email]! > 0) {
+        controllers[email]!.text = multiplePayers[email]!.toString();
+      }
+    }
+  }
+
   Widget _buildSinglePayerItem(String memberName, String memberEmail) {
     final isSelected = selectedSinglePayer == memberEmail;
-
     return GestureDetector(
       onTap: () {
         setState(() {
           selectedSinglePayer = memberEmail;
+          // Clear multiple data when user selects someone in single mode
+          multiplePayers.clear();
+          for (var controller in controllers.values) {
+            controller.clear();
+          }
         });
-        // 直接确认选择并关闭，像 Select Group 一样
         widget.onConfirm('Single', memberEmail, {});
       },
       child: Container(
@@ -2679,7 +3557,10 @@ class _PaidBySelectorState extends State<PaidBySelector> {
         decoration: BoxDecoration(
           color: Color.fromARGB(255, 37, 37, 39),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade700, width: 1.0),
+          border: Border.all(
+            color: isSelected ? Color(0xFF7F55FF) : Colors.grey.shade700,
+            width: isSelected ? 2.0 : 1.0,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2703,11 +3584,11 @@ class _PaidBySelectorState extends State<PaidBySelector> {
   }
 
   Widget _buildMultiplePayerItem(String memberName, String memberEmail) {
-    // 为每个成员创建独立的 controller
     if (!controllers.containsKey(memberEmail)) {
       controllers[memberEmail] = TextEditingController();
     }
     final controller = controllers[memberEmail]!;
+    final hasAmount = multiplePayers.containsKey(memberEmail) && multiplePayers[memberEmail]! > 0;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4.0),
@@ -2715,7 +3596,10 @@ class _PaidBySelectorState extends State<PaidBySelector> {
       decoration: BoxDecoration(
         color: Color.fromARGB(255, 37, 37, 39),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade700, width: 1.0),
+        border: Border.all(
+          color: hasAmount ? Color(0xFF7F55FF) : Colors.grey.shade700,
+          width: hasAmount ? 2.0 : 1.0,
+        ),
       ),
       child: Row(
         children: [
@@ -2773,11 +3657,11 @@ class _PaidBySelectorState extends State<PaidBySelector> {
               ),
               style: TextStyle(color: Colors.white, fontSize: 14),
               onTap: () {
-                // 延迟滚动，等待键盘弹出
                 Future.delayed(Duration(milliseconds: 500), () {
                   if (widget.scrollController.hasClients) {
-                    // 滚动到最大位置，确保最后的输入框可见
-                    final maxScroll = widget.scrollController.position.maxScrollExtent;
+                    // Scroll automatically ensure last input field is visible
+                    final maxScroll =
+                        widget.scrollController.position.maxScrollExtent;
                     widget.scrollController.animateTo(
                       maxScroll,
                       duration: Duration(milliseconds: 400),
@@ -2790,7 +3674,7 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                 final amount = double.tryParse(value) ?? 0.0;
                 setState(() {
                   if (amount > 0) {
-                    // 检查是否超过总金额
+                    // Check if exceeds total amount
                     final currentDivided =
                         multiplePayers.values.fold(
                           0.0,
@@ -2798,7 +3682,7 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                         ) -
                         (multiplePayers[memberEmail] ?? 0.0);
                     if (currentDivided + amount > widget.totalAmount) {
-                      // 超过总金额时，设置为剩余金额
+                      // When exceeding total amount, set to remaining amount
                       final maxAllowed = widget.totalAmount - currentDivided;
                       if (maxAllowed > 0) {
                         multiplePayers[memberEmail] = maxAllowed;
@@ -2876,7 +3760,7 @@ class _PaidBySelectorState extends State<PaidBySelector> {
 
   @override
   void dispose() {
-    // 清理所有 controllers
+    // Clean up all controllers
     for (var controller in controllers.values) {
       controller.dispose();
     }
@@ -2885,7 +3769,6 @@ class _PaidBySelectorState extends State<PaidBySelector> {
 
   @override
   Widget build(BuildContext context) {
-    // Check if keyboard is visible
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final isKeyboardVisible = keyboardHeight > 0;
 
@@ -2928,13 +3811,6 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                       onPressed: () {
                         setState(() {
                           paidByType = 'Single';
-                          selectedSinglePayer = null;
-                          multiplePayers.clear();
-                          // 清空所有输入框
-                          for (var controller in controllers.values) {
-                            controller.clear();
-                          }
-                          controllers.clear();
                         });
                       },
                       style: ElevatedButton.styleFrom(
@@ -2957,12 +3833,6 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                         setState(() {
                           paidByType = 'Multiple';
                           selectedSinglePayer = null;
-                          multiplePayers.clear();
-                          // 清空所有输入框
-                          for (var controller in controllers.values) {
-                            controller.clear();
-                          }
-                          controllers.clear();
                         });
                       },
                       style: ElevatedButton.styleFrom(
@@ -2996,7 +3866,9 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                   child: ListView.builder(
                     controller: widget.scrollController,
                     padding: EdgeInsets.only(
-                      bottom: isKeyboardVisible ? 400 : 20, // 为浮动总结和键盘留出空间
+                      bottom: isKeyboardVisible
+                          ? 400
+                          : 20,
                     ),
                     itemCount: widget.groupMembers.length,
                     itemBuilder: (context, index) {
@@ -3013,11 +3885,11 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                   ),
                 ),
 
-                // 只在 Multiple 模式时显示总结信息和 Confirm 按钮
+                // Only show summary information and Confirm button in Multiple mode
                 if (paidByType == 'Multiple' && !isKeyboardVisible) ...[
                   SizedBox(height: 16),
 
-                  // Total, Divided, Remaining 显示（只在键盘不可见时显示）
+                  // Total, Divided, Remaining display (only show when keyboard is not visible)
                   Container(
                     padding: EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -3094,7 +3966,7 @@ class _PaidBySelectorState extends State<PaidBySelector> {
             ],
           ),
 
-          // 浮动的 Total/Divided/Remaining 显示（只在 Multiple 模式且键盘可见时显示）
+          // Floating Total/Divided/Remaining display (only in Multiple mode)
           if (paidByType == 'Multiple' && isKeyboardVisible)
             Positioned(
               bottom: keyboardHeight - 16,
@@ -3144,7 +4016,6 @@ class _PaidBySelectorState extends State<PaidBySelector> {
                     SizedBox(width: 8),
                     GestureDetector(
                       onTap: () {
-                        // Dismiss keyboard
                         FocusScope.of(context).unfocus();
                       },
                       child: Container(

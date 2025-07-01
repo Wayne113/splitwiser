@@ -47,5 +47,24 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>splitwiser-19a4c.web.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>https</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.example.splitwiser</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.example.splitwiser</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
